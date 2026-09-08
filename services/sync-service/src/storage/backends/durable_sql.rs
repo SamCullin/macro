@@ -214,12 +214,36 @@ impl SnapshotStorage for DurableSQLStorage {
 
 fn chunk_data_from_row(row: Vec<SqlStorageValue>) -> Result<(i64, Vec<u8>)> {
     let mut row = row.into_iter();
-    let Some(SqlStorageValue::Integer(chunk)) = row.next() else {
-        todo!()
+    let chunk = match row.next() {
+        Some(SqlStorageValue::Integer(chunk)) => chunk,
+        Some(_) => {
+            return Err(Error::from(
+                "Durable Object SQL snapshot row has a non-integer chunk index".to_owned(),
+            ));
+        }
+        None => {
+            return Err(Error::from(
+                "Durable Object SQL snapshot row is missing its chunk index".to_owned(),
+            ));
+        }
     };
-    let Some(SqlStorageValue::Blob(data)) = row.next() else {
-        todo!()
+    let data = match row.next() {
+        Some(SqlStorageValue::Blob(data)) => data,
+        Some(_) => {
+            return Err(Error::from(
+                "Durable Object SQL snapshot row has non-blob data".to_owned(),
+            ));
+        }
+        None => {
+            return Err(Error::from(
+                "Durable Object SQL snapshot row is missing its data".to_owned(),
+            ));
+        }
     };
-    debug_assert!(row.next().is_none());
+    if row.next().is_some() {
+        return Err(Error::from(
+            "Durable Object SQL snapshot row has unexpected extra columns".to_owned(),
+        ));
+    }
     Ok((chunk, data))
 }

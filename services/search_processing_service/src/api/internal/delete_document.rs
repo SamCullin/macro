@@ -32,5 +32,5 @@ pub async fn handler(
                 .into_response()
         })?;
 
-    todo!()
+    Ok(StatusCode::OK.into_response())
 }

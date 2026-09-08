@@ -5,6 +5,15 @@ use macro_env_var::maybe_env_vars;
 
 const OPENAI_CHAT_COMPLETIONS_URL: &str = "https://api.openai.com/v1/chat/completions";
 
+fn chat_completions_endpoint(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    if trimmed.ends_with("/chat/completions") {
+        trimmed.to_owned()
+    } else {
+        format!("{trimmed}/chat/completions")
+    }
+}
+
 maybe_env_vars! {
     struct OpenaiApiKey;
     struct OpenaiBaseUrl;
@@ -27,9 +36,10 @@ pub async fn handler(
         .and_then(|base_url| base_url.value().map(str::to_owned))
         .filter(|base_url| !base_url.is_empty())
         .unwrap_or_else(|| OPENAI_CHAT_COMPLETIONS_URL.to_owned());
+    let endpoint = chat_completions_endpoint(&base_url);
 
     let response = reqwest::Client::new()
-        .post(base_url)
+        .post(endpoint)
         .bearer_auth(api_key)
         .json(&body)
         .send()
@@ -49,4 +59,25 @@ pub async fn handler(
         [(axum::http::header::CONTENT_TYPE, "application/json")],
         bytes,
     ))
+}
+
+#[cfg(test)]
+mod test {
+    use super::chat_completions_endpoint;
+
+    #[test]
+    fn accepts_an_openai_compatible_base_url() {
+        assert_eq!(
+            chat_completions_endpoint("https://llm.example/v1/"),
+            "https://llm.example/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn preserves_a_full_chat_completions_url() {
+        assert_eq!(
+            chat_completions_endpoint("https://llm.example/v1/chat/completions/"),
+            "https://llm.example/v1/chat/completions"
+        );
+    }
 }
