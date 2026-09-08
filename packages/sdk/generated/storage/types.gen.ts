@@ -160,6 +160,27 @@ export type AgentMcpServers = {
     servers: Array<AgentMcpServer>;
 };
 
+/**
+ * Filters for agent sessions.
+ */
+export type AgentSessionFilters = {
+    /**
+     * Agent session ids to filter by. Empty to include all accessible sessions.
+     */
+    ids?: Array<string>;
+    /**
+     * Opt this query into agent sessions at all. Agent sessions are off by
+     * default — see [`crate::ast::agent_session::AgentSessionLiteral::Include`].
+     * Asking for specific `ids` or `owners` also opts in.
+     */
+    include?: boolean;
+    /**
+     * Filter by session owner. Examples: ['macro|user1@user.com']. Empty to
+     * include every owner.
+     */
+    owners?: Array<string>;
+};
+
 export type Anchor = PdfAnchor;
 
 export type AnchorId = PdfAnchorId & {
@@ -724,6 +745,12 @@ export type ApiCountedReaction = {
  * Wire-format entity filter AST accepted by soup AST endpoints.
  */
 export type ApiEntityFilterAst = {
+    /**
+     * Filters applied to agent sessions (wire key `asf`). Like reminders,
+     * empty/omitted returns **no** agent sessions: they are opt-in, so the
+     * caller must send `inc`, an id, or an owner to get any.
+     */
+    asf?: unknown;
     /**
      * filters applied to canonical calendar events
      */
@@ -4944,6 +4971,10 @@ export type EnsureCollabSurfaceRequest = {
  */
 export type EntityFilters = {
     /**
+     * the bundled [AgentSessionFilters]
+     */
+    agent_session_filters?: AgentSessionFilters;
+    /**
      * the bundled [CalendarEventFilters]
      */
     calendar_event_filters?: CalendarEventFilters;
@@ -7407,6 +7438,61 @@ export type SimpleMention = {
 };
 
 /**
+ * An agent session as displayed in Soup.
+ *
+ * Mirrors [`crate::chat::SoupChat`]: an agent session is the coding-agent
+ * counterpart of a chat, so it carries the same identity, ownership, and
+ * recency fields plus the session's last known status.
+ */
+export type SoupAgentSessionSoupPropertiesField = {
+    /**
+     * Properties attached to the entity.
+     */
+    properties: Array<SoupProperty>;
+} & {
+    /**
+     * The bot running this session
+     */
+    botId: string;
+    /**
+     * The time the session was created
+     */
+    createdAt: string;
+    /**
+     * The agent session uuid
+     */
+    id: string;
+    /**
+     * The user-facing name of the session
+     */
+    name: string;
+    /**
+     * Who the session belongs to
+     */
+    ownerId: string;
+    /**
+     * The session's last known status.
+     *
+     * `no_messages` until the first system event arrives, `disconnected` if
+     * the connection dropped without a clean close, otherwise the wire name
+     * of the most recent system event (for example `session/end`).
+     */
+    status: string;
+    /**
+     * The channel thread the session was opened from, when any
+     */
+    threadId?: string | null;
+    /**
+     * The time the session was last modified
+     */
+    updatedAt: string;
+    /**
+     * The time the session was last viewed by the requesting user
+     */
+    viewedAt?: string | null;
+};
+
+/**
  * API representation of a soup item with its per-viewer enrichments.
  */
 export type SoupApiItem = SoupItem & {
@@ -8220,6 +8306,12 @@ export type SoupItem = {
      */
     data: SoupReminderSoupPropertiesField;
     tag: 'reminder';
+} | {
+    /**
+     * Agent session item.
+     */
+    data: SoupAgentSessionSoupPropertiesField;
+    tag: 'agentSession';
 };
 
 /**
