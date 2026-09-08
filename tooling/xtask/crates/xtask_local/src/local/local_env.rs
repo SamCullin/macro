@@ -107,6 +107,17 @@ impl LocalEnv {
         self.agent_harness.write(&mut env);
         self.service_auth.write(&mut env);
         self.fusionauth.write(&mut env);
+        // Optional production adapters. Empty values keep local stacks on
+        // their built-in Mailpit/direct-provider defaults; --env-file can
+        // supply real Resend or LiteLLM settings without changing this layer.
+        env.insert("RESEND_API_KEY".into(), String::new());
+        env.insert(
+            "RESEND_API_BASE_URL".into(),
+            "https://api.resend.com".into(),
+        );
+        env.insert("LITELLM_API_KEY".into(), String::new());
+        env.insert("LITELLM_BASE_URL".into(), String::new());
+        env.insert("OPENAI_BASE_URL".into(), String::new());
         env
     }
 

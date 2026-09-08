@@ -56,6 +56,17 @@ impl TextEmbedding3Small {
         }
     }
 
+    /// Creates an embedder authenticated with `api_key` against an
+    /// OpenAI-compatible embeddings endpoint.
+    pub fn with_api_base(api_key: impl Into<String>, api_base: impl Into<String>) -> Self {
+        let config = OpenAIConfig::new()
+            .with_api_key(api_key)
+            .with_api_base(api_base);
+        Self {
+            client: Client::with_config(config),
+        }
+    }
+
     /// Creates an embedder from a pre-configured OpenAI client.
     ///
     /// Use this to customize the API base, organization, HTTP client, etc.

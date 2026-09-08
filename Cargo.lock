@@ -14987,6 +14987,8 @@ dependencies = [
  "lettre",
  "macro_env_var",
  "mockall",
+ "reqwest 0.13.4",
+ "serde_json",
  "tracing",
  "workspace-hack",
 ]

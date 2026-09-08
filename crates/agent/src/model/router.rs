@@ -21,7 +21,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use ai_toolset::{RequestContext, SearchableTool};
 use ai_usage::{UsageContext, UsageRecorder};
 use futures::StreamExt;
-use macro_env_var::env_var;
+use macro_env_var::{env_var, maybe_env_var};
 use rig_agent::agent::{Agent, AgentBuilder, MultiTurnStreamItem};
 use rig_agent::streaming::StreamingPrompt;
 use rig_agent::tool::server::ToolServerHandle;
@@ -46,6 +46,16 @@ env_var! {
     }
 }
 
+maybe_env_var! {
+    /// OpenAI-compatible LiteLLM API key; unset keeps the upstream providers.
+    struct LitellmApiKey;
+}
+
+maybe_env_var! {
+    /// OpenAI-compatible LiteLLM base URL, including the /v1 path.
+    struct LitellmBaseUrl;
+}
+
 /// Provider segment for native Anthropic.
 const ANTHROPIC_PROVIDER: &str = "anthropic";
 /// Provider segment the built-in OpenAI client is registered under.
@@ -55,6 +65,8 @@ const OPENAI_PROVIDER: &str = "openai";
 const CEREBRAS_PROVIDER: &str = "cerebras";
 /// Cerebras inference endpoint (OpenAI-compatible Chat Completions API).
 const CEREBRAS_BASE_URL: &str = "https://api.cerebras.ai/v1";
+/// Our OpenAI-compatible gateway provider.
+const LITELLM_PROVIDER: &str = "litellm";
 
 /// A routed model id bound to the provider client that serves it.
 pub(crate) enum RoutedModel<'a> {
@@ -260,11 +272,26 @@ impl ModelRouter {
             .build()?;
         // Cerebras speaks the OpenAI Chat Completions API, so it rides the
         // compatible-provider registry: `cerebras/<model>` ids route to it.
-        Self::new(anthropic, openai).with_openai_provider(
+        let router = Self::new(anthropic, openai).with_openai_provider(
             CEREBRAS_PROVIDER,
             CEREBRAS_BASE_URL,
             &env.cerebras_api_key,
-        )
+        )?;
+
+        let Some(api_key) = LitellmApiKey::new()
+            .and_then(|key| key.value().map(str::to_owned))
+            .filter(|key| !key.is_empty())
+        else {
+            return Ok(router);
+        };
+        let Some(base_url) = LitellmBaseUrl::new()
+            .and_then(|url| url.value().map(str::to_owned))
+            .filter(|url| !url.is_empty())
+        else {
+            return Ok(router);
+        };
+
+        router.with_openai_provider(LITELLM_PROVIDER, &base_url, &api_key)
     }
 
     /// The process-wide full router, built from the environment on first use.

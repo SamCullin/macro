@@ -938,8 +938,13 @@ async fn run() -> anyhow::Result<()> {
         !cohere_api_key.trim().is_empty(),
         "Cohere API key is required for task dedup reranking",
     );
+    let task_dedup_embedder = config::OpenaiBaseUrl::new()
+        .and_then(|base_url| base_url.value().map(str::to_owned))
+        .filter(|base_url| !base_url.is_empty())
+        .map(|base_url| TextEmbedding3Small::with_api_base(openai_api_key.clone(), base_url))
+        .unwrap_or_else(|| TextEmbedding3Small::new(openai_api_key));
     let task_dedup_service = Arc::new(TaskDedupService::new(
-        TextEmbedding3Small::new(openai_api_key),
+        task_dedup_embedder,
         PgTaskVectorDb::new(db.clone()),
         CohereReranker::new(cohere_api_key),
         Arc::new(AgentDuplicateJudge::new(ai_usage::pg_recorder(db.clone()))),

@@ -1,5 +1,6 @@
 mod invite_user;
 mod send_email;
+mod send_email_resend;
 mod send_email_smtp;
 
 use aws_sdk_sesv2 as ses;
@@ -9,6 +10,8 @@ use mockall::automock;
 macro_env_var::maybe_env_vars! {
     struct SmtpHost;
     struct SmtpPort;
+    struct ResendApiKey;
+    struct ResendApiBaseUrl;
 }
 
 #[cfg(test)]
@@ -21,7 +24,15 @@ pub use SesClient as Ses;
 #[derive(Clone, Debug)]
 enum Transport {
     Ses(ses::Client),
-    Smtp { host: String, port: u16 },
+    Smtp {
+        host: String,
+        port: u16,
+    },
+    Resend {
+        client: reqwest::Client,
+        api_key: String,
+        base_url: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -33,18 +44,33 @@ pub struct SesClient {
 
 #[cfg_attr(test, automock)]
 impl SesClient {
-    /// Construct from the environment: route to local SMTP (Mailpit) when
-    /// `SMTP_HOST` is set, otherwise SES. The SES client is still passed in (and
-    /// kept for the SES path) so callers don't branch.
+    /// Construct from the environment: prefer Resend HTTP when `RESEND_API_KEY`
+    /// is set, then local SMTP when `SMTP_HOST` is set, otherwise SES. The SES
+    /// client is still passed in so callers don't branch.
     pub fn from_env(inner: ses::Client, environment: &str) -> Self {
-        let transport = match SmtpHost::new().and_then(|host| host.value().map(str::to_string)) {
-            Some(host) if !host.is_empty() => {
-                let port = SmtpPort::new()
-                    .and_then(|p| p.value().and_then(|p| p.parse().ok()))
-                    .unwrap_or(1025);
-                Transport::Smtp { host, port }
+        let transport = if let Some(api_key) = ResendApiKey::new()
+            .and_then(|key| key.value().map(str::to_string))
+            .filter(|key| !key.is_empty())
+        {
+            let base_url = ResendApiBaseUrl::new()
+                .and_then(|url| url.value().map(str::to_string))
+                .filter(|url| !url.is_empty())
+                .unwrap_or_else(|| "https://api.resend.com".to_string());
+            Transport::Resend {
+                client: reqwest::Client::new(),
+                api_key,
+                base_url,
             }
-            _ => Transport::Ses(inner),
+        } else {
+            match SmtpHost::new().and_then(|host| host.value().map(str::to_string)) {
+                Some(host) if !host.is_empty() => {
+                    let port = SmtpPort::new()
+                        .and_then(|p| p.value().and_then(|p| p.parse().ok()))
+                        .unwrap_or(1025);
+                    Transport::Smtp { host, port }
+                }
+                _ => Transport::Ses(inner),
+            }
         };
         Self {
             transport,
@@ -104,6 +130,16 @@ impl SesClient {
             Transport::Smtp { host, port } => {
                 send_email_smtp::send_email_smtp(
                     host, *port, from_email, to_email, subject, content,
+                )
+                .await
+            }
+            Transport::Resend {
+                client,
+                api_key,
+                base_url,
+            } => {
+                send_email_resend::send_email_resend(
+                    client, api_key, base_url, from_email, to_email, subject, content,
                 )
                 .await
             }

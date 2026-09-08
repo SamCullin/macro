@@ -7,6 +7,7 @@ const OPENAI_CHAT_COMPLETIONS_URL: &str = "https://api.openai.com/v1/chat/comple
 
 maybe_env_vars! {
     struct OpenaiApiKey;
+    struct OpenaiBaseUrl;
 }
 
 /// A non-streaming proxy to the chatgpt api
@@ -22,9 +23,13 @@ pub async fn handler(
     let api_key = OpenaiApiKey::new()
         .map(|api_key| api_key.to_string())
         .unwrap_or_default();
+    let base_url = OpenaiBaseUrl::new()
+        .and_then(|base_url| base_url.value().map(str::to_owned))
+        .filter(|base_url| !base_url.is_empty())
+        .unwrap_or_else(|| OPENAI_CHAT_COMPLETIONS_URL.to_owned());
 
     let response = reqwest::Client::new()
-        .post(OPENAI_CHAT_COMPLETIONS_URL)
+        .post(base_url)
         .bearer_auth(api_key)
         .json(&body)
         .send()
