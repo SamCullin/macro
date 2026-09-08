@@ -531,6 +531,10 @@ impl UnprocessedEventsRepo for FrecencyPgProcessor {
         &self,
         aggregates: Vec<AggregateId<'_>>,
     ) -> Result<Vec<AggregateFrecency>, Self::Err> {
+        if aggregates.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let mut guard = self.tx.try_lock()?;
         let tx = guard.as_deref_mut().ok_or(PollerErr::TxErr)?;
 
