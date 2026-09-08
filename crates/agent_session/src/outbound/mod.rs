@@ -7,3 +7,6 @@ pub mod name_generator;
 
 /// Streaming a live session's log to a channel's viewers.
 pub mod connection_gateway_realtime;
+
+/// Publishing session lifecycle events to Kafka.
+pub mod broker_lifecycle_sink;

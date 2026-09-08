@@ -1,6 +1,10 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
+use agent_session::domain::events::{
+    AgentSessionCreatedMetadata, AgentSessionDeletedMetadata, AgentSessionRenamedMetadata,
+    AgentSessionStatusChangedMetadata, SessionStatusMetadata,
+};
 use channels::domain::{
     broker_events::{
         ChannelEventAttachment, ChannelMessageAttachmentCreatedMetadata,
@@ -115,8 +119,58 @@ fn subscribes_to_all_existing_soup_source_topics() {
             "macro.email",
             "macro.channels",
             "macro.properties",
+            "macro.agent_session_lifecycle",
         ]
     );
+}
+
+#[test]
+fn agent_session_lifecycle_events_map_to_updated_and_deleted_patches() {
+    let session_id = Uuid::now_v7().to_string();
+    let updates = [
+        AgentSessionLifecycleTopicEvent::Created(AgentSessionCreatedMetadata {
+            agent_session_id: session_id.clone(),
+            owner: user(),
+            bot_id: Uuid::now_v7().to_string(),
+            name: "New Agent Session".to_string(),
+            thread_id: None,
+        }),
+        AgentSessionLifecycleTopicEvent::Renamed(AgentSessionRenamedMetadata {
+            agent_session_id: session_id.clone(),
+            name: "Fix the flaky test".to_string(),
+        }),
+        AgentSessionLifecycleTopicEvent::StatusChanged(AgentSessionStatusChangedMetadata {
+            agent_session_id: session_id.clone(),
+            status: SessionStatusMetadata {
+                status: "event".to_string(),
+                event_name: Some("acp_ready".to_string()),
+            },
+        }),
+    ];
+    for event in &updates {
+        let patches = patches_from_agent_session_event(event);
+        assert_eq!(patches.len(), 1, "{event:?}");
+        assert!(matches!(patches[0].patch, Patch::Updated(_)), "{event:?}");
+        assert_eq!(
+            patch_entity(&patches[0]).entity_type,
+            EntityType::AgentSession
+        );
+        assert_eq!(patch_entity(&patches[0]).entity_id, session_id);
+        // The session is its own access source: whoever may read it hears.
+        assert_eq!(patches[0].access_source, *patch_entity(&patches[0]));
+    }
+
+    let deleted = AgentSessionLifecycleTopicEvent::Deleted(AgentSessionDeletedMetadata {
+        agent_session_id: session_id.clone(),
+    });
+    let patches = patches_from_agent_session_event(&deleted);
+    assert_eq!(patches.len(), 1);
+    assert!(matches!(patches[0].patch, Patch::Deleted(_)));
+    assert_eq!(
+        patch_entity(&patches[0]).entity_type,
+        EntityType::AgentSession
+    );
+    assert_eq!(patch_entity(&patches[0]).entity_id, session_id);
 }
 
 #[test]

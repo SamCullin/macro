@@ -45,16 +45,18 @@ use bots::domain::models::BotId;
 
 use super::connection::RuntimeAttachment;
 use super::error::{AgentSessionError, Result};
+use super::events::AgentSessionLifecycleMacroEvent;
 use super::model::{
     AgentSession, AgentSessionId, AgentSessionLog, AgentSessionPreview, AgentSessionRenamed,
     AuthorKind, ChannelSession, ClaimOutcome, CreateAgentSessionParams, LogAppended,
     MAX_AGENT_SESSION_NAME_CHARS, MAX_PREVIEW_SESSION_IDS, Message, MessageId, ReplicaId,
-    SandboxSize, SessionClaim, SessionLog, SessionManagement, StoredAgentSessionLog,
+    SandboxSize, SessionClaim, SessionLog, SessionManagement, SessionStatus, StoredAgentSessionLog,
 };
 use super::ports::{
-    AgentConnector, AgentSessionLogRepo, AgentSessionLogWriter, AgentSessionNameGenerator,
-    AgentSessionQueueChanged, AgentSessionRealtime, AgentSessionRepo,
-    NoOpAgentSessionNameGenerator, NoOpTurnObserver, SessionOwnership, SessionTurnObserver,
+    AgentConnector, AgentSessionLifecycleSink, AgentSessionLogRepo, AgentSessionLogWriter,
+    AgentSessionNameGenerator, AgentSessionQueueChanged, AgentSessionRealtime, AgentSessionRepo,
+    NoOpAgentSessionNameGenerator, NoOpLifecycleSink, NoOpTurnObserver, SessionOwnership,
+    SessionTurnObserver,
 };
 use super::session::actors::{SessionActor, SessionCommand, Stepped};
 use super::session::{CloseReason, Input};
@@ -264,6 +266,10 @@ pub struct AgentSessionServiceImpl<R, Folds, Rt, Namer = NoOpAgentSessionNameGen
     /// Told when a session's turn ends or its actor stops - the harness's
     /// prompt-queue gate. Erased so wiring it is not another type parameter.
     turn_observer: Arc<dyn SessionTurnObserver>,
+    /// Told when a session is created, renamed, changes status, or is
+    /// deleted - the feed for everything projecting sessions. Erased for the
+    /// same reason as the turn observer.
+    lifecycle_sink: Arc<dyn AgentSessionLifecycleSink>,
     active: Arc<ActiveSessions>,
     /// This service's identity in the session-management lease. Minted at
     /// construction: a restarted process is a new replica, and its claims
@@ -288,6 +294,7 @@ impl<R, Folds, Rt> AgentSessionServiceImpl<R, Folds, Rt> {
             realtime,
             name_generator: NoOpAgentSessionNameGenerator,
             turn_observer: Arc::new(NoOpTurnObserver),
+            lifecycle_sink: Arc::new(NoOpLifecycleSink),
             active: Arc::new(DashMap::new()),
             replica: ReplicaId::mint(),
             tasks: TaskTracker::new(),
@@ -310,6 +317,7 @@ impl<R, Folds, Rt, Namer> AgentSessionServiceImpl<R, Folds, Rt, Namer> {
             realtime: self.realtime,
             name_generator,
             turn_observer: self.turn_observer,
+            lifecycle_sink: self.lifecycle_sink,
             active: self.active,
             replica: self.replica,
             tasks: self.tasks,
@@ -323,6 +331,17 @@ impl<R, Folds, Rt, Namer> AgentSessionServiceImpl<R, Folds, Rt, Namer> {
     #[must_use]
     pub fn with_turn_observer(mut self, turn_observer: Arc<dyn SessionTurnObserver>) -> Self {
         self.turn_observer = turn_observer;
+        self
+    }
+
+    /// Replace the no-op lifecycle sink with whoever projects sessions - in
+    /// production, the Kafka lifecycle topic.
+    #[must_use]
+    pub fn with_lifecycle_sink(
+        mut self,
+        lifecycle_sink: Arc<dyn AgentSessionLifecycleSink>,
+    ) -> Self {
+        self.lifecycle_sink = lifecycle_sink;
         self
     }
 
@@ -426,7 +445,8 @@ impl<R, Folds, Rt, Namer> AgentSessionServiceImpl<R, Folds, Rt, Namer> {
         // something. Fenced under the claim taken above: if another replica
         // supersedes this one, the store rejects the next append and the
         // actor tears down through its ordinary log-failure path.
-        let logs = LiveSessionLogWriter::fenced(self.repo.clone(), self.realtime.clone(), claim);
+        let logs = LiveSessionLogWriter::fenced(self.repo.clone(), self.realtime.clone(), claim)
+            .with_lifecycle_sink(self.lifecycle_sink.clone());
         let actor = SessionActor::new(
             id,
             session.acp_session_id,
@@ -563,7 +583,10 @@ where
     Namer: AgentSessionNameGenerator + Clone,
 {
     async fn create_session(&self, params: CreateAgentSessionParams) -> Result<AgentSession> {
-        AgentSessionRepo::create(&self.repo, params).await
+        let session = AgentSessionRepo::create(&self.repo, params).await?;
+        self.lifecycle_sink
+            .publish(AgentSessionLifecycleMacroEvent::created(&session));
+        Ok(session)
     }
 
     async fn rename_session(
@@ -582,6 +605,8 @@ where
                 |error| anyhow::anyhow!("invalid agent session access receipt: {error}"),
             )?);
         self.repo.set_name(id, name).await?;
+        self.lifecycle_sink
+            .publish(AgentSessionLifecycleMacroEvent::renamed(id, name));
         self.realtime
             .publish_renamed(AgentSessionRenamed {
                 agent_session_id: id,
@@ -634,6 +659,10 @@ where
         let result = self.repo.delete(id).await;
         self.active
             .remove_if(&id, |_, active| Arc::ptr_eq(&active.marker, &marker));
+        if result.is_ok() {
+            self.lifecycle_sink
+                .publish(AgentSessionLifecycleMacroEvent::deleted(id));
+        }
         result
     }
 
@@ -658,7 +687,8 @@ where
     }
 
     async fn mark_disconnected(&self, id: AgentSessionId) -> Result<()> {
-        let mut logs = LiveSessionLogWriter::new(self.repo.clone(), self.realtime.clone());
+        let mut logs = LiveSessionLogWriter::new(self.repo.clone(), self.realtime.clone())
+            .with_lifecycle_sink(self.lifecycle_sink.clone());
         tokio::time::timeout(
             SESSION_PERSIST_TIMEOUT,
             logs.append(AgentSessionLog {
@@ -734,6 +764,7 @@ where
             spawn_initial_agent_session_rename(
                 self.repo.clone(),
                 self.realtime.clone(),
+                self.lifecycle_sink.clone(),
                 self.name_generator.clone(),
                 id,
                 initial_prompt,
@@ -809,6 +840,7 @@ where
 fn spawn_initial_agent_session_rename<R, Rt, Namer>(
     repo: R,
     realtime: Rt,
+    lifecycle_sink: Arc<dyn AgentSessionLifecycleSink>,
     name_generator: Namer,
     id: AgentSessionId,
     initial_prompt: String,
@@ -836,6 +868,7 @@ fn spawn_initial_agent_session_rename<R, Rt, Namer>(
             if !renamed {
                 return Ok(());
             }
+            lifecycle_sink.publish(AgentSessionLifecycleMacroEvent::renamed(id, &name));
             realtime
                 .publish_renamed(AgentSessionRenamed {
                     agent_session_id: id,
@@ -886,6 +919,10 @@ fn validate_agent_session_name(raw: &str) -> Result<&str> {
 pub struct LiveSessionLogWriter<R, Rt> {
     repo: R,
     realtime: Rt,
+    /// Told when a frame moves the session to a new status. System events are
+    /// the only frames that change the session row, so they are the only
+    /// frames anything projecting sessions needs to hear about.
+    lifecycle_sink: Arc<dyn AgentSessionLifecycleSink>,
     fold: Option<FoldMachineImpl>,
     /// The management claim this writer appends under, when it has one. A
     /// session actor always writes fenced; the unfenced constructor exists
@@ -906,6 +943,7 @@ impl<R, Rt> LiveSessionLogWriter<R, Rt> {
         Self {
             repo,
             realtime,
+            lifecycle_sink: Arc::new(NoOpLifecycleSink),
             fold: None,
             claim: None,
         }
@@ -917,9 +955,21 @@ impl<R, Rt> LiveSessionLogWriter<R, Rt> {
         Self {
             repo,
             realtime,
+            lifecycle_sink: Arc::new(NoOpLifecycleSink),
             fold: None,
             claim: Some(claim),
         }
+    }
+
+    /// Replace the no-op lifecycle sink, so status-changing frames this writer
+    /// appends are announced to whoever projects sessions.
+    #[must_use]
+    pub fn with_lifecycle_sink(
+        mut self,
+        lifecycle_sink: Arc<dyn AgentSessionLifecycleSink>,
+    ) -> Self {
+        self.lifecycle_sink = lifecycle_sink;
+        self
     }
 }
 
@@ -961,6 +1011,16 @@ where
             None if boundary.is_some() => return Err(AgentSessionError::FencedOut(session)),
             None => AgentSessionLogRepo::create(&self.repo, log.clone()).await?,
         };
+
+        // The append above is what moved the session row's status, so the
+        // announcement goes out here, after it is durable.
+        if let Message::ToServer(ToServerMessage::Event { event }) = &log.content {
+            self.lifecycle_sink
+                .publish(AgentSessionLifecycleMacroEvent::status_changed(
+                    session,
+                    &SessionStatus::Event(event.clone()),
+                ));
+        }
 
         if let Some(fold) = &mut self.fold {
             let _ = fold.push(log.clone());

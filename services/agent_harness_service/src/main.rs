@@ -55,11 +55,14 @@ use agent_inmem::outbound::manager::InMemAgentManager;
 use agent_inmem::outbound::rig_engine::RigTurnEngine;
 use agent_runtime_directory::PgAgentRuntimeDirectory;
 use agent_session::domain::model::{AgentMcpServers, ReplicaId};
-use agent_session::domain::ports::{NoOpRealtime, SessionOwnership as _};
+use agent_session::domain::ports::{
+    AgentSessionLifecycleSink, NoOpRealtime, SessionOwnership as _,
+};
 use agent_session::domain::service::AgentSessionServiceImpl;
 use agent_session::inbound::axum_router::{
     AgentSessionControlState, AgentSessionRouterState, CreateSessionState,
 };
+use agent_session::outbound::broker_lifecycle_sink::BrokerLifecycleSink;
 use agent_session::outbound::connection_gateway_realtime::ConnectionGatewayAgentSessionRealtime;
 use agent_session::outbound::name_generator::HaikuAgentSessionNameGenerator;
 use agent_session::outbound::postgres::PgAgentSessionRepo;
@@ -203,6 +206,17 @@ async fn run() -> anyhow::Result<()> {
     // Bound to the harness once it exists (it is built *from* this service);
     // both attach-capable service instances report turns to the same one.
     let turn_observer = Arc::new(agent_session::domain::ports::LateBoundTurnObserver::new());
+    // The one Kafka producer for the process. Built here, ahead of the channel
+    // plumbing that also publishes through it, because every session service
+    // instance announces session lifecycle changes over it - the feed Soup
+    // realtime and anything else projecting sessions consumes.
+    let broker = MacroEventBrokerService::new(
+        KafkaEventPublisher::new(config.kafka_brokers.as_ref())
+            .context("failed to create kafka event publisher")?,
+        macro_event_broker::GlobalSpawner,
+    );
+    let lifecycle_sink: Arc<dyn AgentSessionLifecycleSink> =
+        Arc::new(BrokerLifecycleSink::new(broker.clone()));
     let sessions = AgentSessionServiceImpl::new(
         session_repo.clone(),
         FoldedMessageService::new(session_repo.clone()),
@@ -213,6 +227,7 @@ async fn run() -> anyhow::Result<()> {
     )
     .with_replica(replica)
     .with_turn_observer(turn_observer.clone())
+    .with_lifecycle_sink(lifecycle_sink.clone())
     .with_name_generator(HaikuAgentSessionNameGenerator::new(ai_usage::pg_recorder(
         pool.clone(),
     )));
@@ -355,7 +370,8 @@ async fn run() -> anyhow::Result<()> {
         NoOpRealtime,
     )
     .with_replica(replica)
-    .with_turn_observer(turn_observer.clone());
+    .with_turn_observer(turn_observer.clone())
+    .with_lifecycle_sink(lifecycle_sink.clone());
     let sandbox_and_inmem = RoutedContainers::new(sandbox, inmem, inmem_sessions);
 
     // Cursor sessions run on their owner's own Cursor account, so there is no
@@ -439,11 +455,6 @@ async fn run() -> anyhow::Result<()> {
             macro_queues::ContactsQueue::new().to_string(),
         ),
     });
-    let broker = MacroEventBrokerService::new(
-        KafkaEventPublisher::new(config.kafka_brokers.as_ref())
-            .context("failed to create kafka event publisher")?,
-        macro_event_broker::GlobalSpawner,
-    );
     let side_effects = ChannelSideEffectService::new(
         PgChannelSideEffectContext::new(pool.clone()),
         ConnectionGatewayChannelRealtimePublisher::new(connection_gateway.clone()),
@@ -576,7 +587,8 @@ async fn run() -> anyhow::Result<()> {
             session_repo.clone(),
             FoldedMessageService::new(session_repo.clone()),
             ConnectionGatewayAgentSessionRealtime::new(connection_gateway, session_repo.clone()),
-        ),
+        )
+        .with_lifecycle_sink(lifecycle_sink),
         entity_access.clone(),
         MacroAuthorizationState::new(Arc::new(authorization_service.clone())),
     );

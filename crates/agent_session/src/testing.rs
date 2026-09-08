@@ -5,19 +5,21 @@
 //! [`AgentSessionLogRepo`] contract without a database.
 
 use crate::domain::error::{AgentSessionError, Result};
+use crate::domain::events::AgentSessionLifecycleTopicEvent;
 use crate::domain::model::{
     AgentMcpServers, AgentSession, AgentSessionId, AgentSessionLog, AgentSessionPreview,
     AgentSessionPreviewData, ChannelSession, ClaimOutcome, CreateAgentSessionParams,
-    DEFAULT_AGENT_SESSION_NAME, LogAppended, ManagerFence, ReplicaAddress, ReplicaId,
-    SandboxSize, SessionBot, SessionClaim, SessionManager, SessionStatus, StoredAgentSessionLog,
+    DEFAULT_AGENT_SESSION_NAME, LogAppended, ManagerFence, ReplicaAddress, ReplicaId, SandboxSize,
+    SessionBot, SessionClaim, SessionManager, SessionStatus, StoredAgentSessionLog,
 };
 use crate::domain::ports::{
-    AgentSessionLogRepo, AgentSessionRealtime, AgentSessionRepo, REPLICA_STALE_AFTER,
-    SessionOwnership,
+    AgentSessionLifecycleSink, AgentSessionLogRepo, AgentSessionRealtime, AgentSessionRepo,
+    REPLICA_STALE_AFTER, SessionOwnership,
 };
 use agent_client_protocol::schema::v1::SessionId;
 use agent_runtime_protocol::domain::schema::v0::ToServerMessage;
 use bots::domain::models::BotId;
+use macro_event_broker::MacroEvent as _;
 use macro_user_id::user_id::MacroUserIdStr;
 use macro_uuid::Uuid;
 use std::collections::HashMap;
@@ -169,9 +171,7 @@ impl AgentSessionRepo for InMemoryAgentSessionRepo {
             .iter()
             .map(|id| match sessions.get(id) {
                 None => AgentSessionPreview::DoesNotExist(*id),
-                Some(session) if session.owner_id != *viewer => {
-                    AgentSessionPreview::NoAccess(*id)
-                }
+                Some(session) if session.owner_id != *viewer => AgentSessionPreview::NoAccess(*id),
                 Some(session) => AgentSessionPreview::Access(AgentSessionPreviewData {
                     id: *id,
                     name: session.name.clone(),
@@ -691,6 +691,41 @@ impl AgentSessionRealtime for RecordingRealtime {
             .expect("in-memory realtime store is not poisoned")
             .push(event);
         Ok(())
+    }
+}
+
+/// An [`AgentSessionLifecycleSink`] that keeps what it is given, so a test
+/// can assert which lifecycle events a mutation announced and in what order.
+///
+/// Cheap to clone - clones share one store.
+#[derive(Debug, Clone, Default)]
+pub struct RecordingLifecycleSink {
+    published: Arc<Mutex<Vec<AgentSessionLifecycleTopicEvent>>>,
+}
+
+impl RecordingLifecycleSink {
+    /// A sink that records everything.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Every event published, in order, without its envelope.
+    #[must_use]
+    pub fn published(&self) -> Vec<AgentSessionLifecycleTopicEvent> {
+        self.published
+            .lock()
+            .expect("in-memory lifecycle store is not poisoned")
+            .clone()
+    }
+}
+
+impl AgentSessionLifecycleSink for RecordingLifecycleSink {
+    fn publish(&self, event: crate::domain::events::AgentSessionLifecycleMacroEvent) {
+        self.published
+            .lock()
+            .expect("in-memory lifecycle store is not poisoned")
+            .push(event.event().event.clone());
     }
 }
 

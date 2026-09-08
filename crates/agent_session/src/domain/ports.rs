@@ -586,6 +586,38 @@ impl<T: SessionTurnObserver + ?Sized> SessionTurnObserver for std::sync::Arc<T> 
     }
 }
 
+/// Where a session's lifecycle events go once they are durable.
+///
+/// [`AgentSessionRealtime`] streams a session's frames to whoever is watching
+/// it; this port tells everything *else* - Soup realtime, search, activity -
+/// that a session came into being, was renamed, changed status, or is gone.
+/// The service calls it after the corresponding write has committed, so a
+/// consumer that reads the session back on receipt sees the new state.
+///
+/// Fire-and-forget by contract: publication must not fail or delay the
+/// mutation it follows, so an implementation logs and drops its own errors.
+/// Object-safe and synchronous so the service can hold it erased, as it holds
+/// its [`SessionTurnObserver`], rather than grow another type parameter.
+pub trait AgentSessionLifecycleSink: Send + Sync + 'static {
+    /// Publish one lifecycle event.
+    fn publish(&self, event: super::events::AgentSessionLifecycleMacroEvent);
+}
+
+impl<T: AgentSessionLifecycleSink + ?Sized> AgentSessionLifecycleSink for std::sync::Arc<T> {
+    fn publish(&self, event: super::events::AgentSessionLifecycleMacroEvent) {
+        (**self).publish(event);
+    }
+}
+
+/// An [`AgentSessionLifecycleSink`] that drops every event: tests, offline
+/// tooling, and replay, where nothing downstream is projecting sessions.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoOpLifecycleSink;
+
+impl AgentSessionLifecycleSink for NoOpLifecycleSink {
+    fn publish(&self, _event: super::events::AgentSessionLifecycleMacroEvent) {}
+}
+
 /// A [`SessionTurnObserver`] for services with no queue above them: tests,
 /// offline tooling, and replay.
 #[derive(Debug, Clone, Copy, Default)]

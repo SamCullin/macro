@@ -299,3 +299,81 @@ async fn get_entity_users_excludes_delegate_scoped_to_other_link(
     );
     Ok(())
 }
+
+/// An agent session is granted to its owner, the channel it was opened
+/// from, and that channel's team - the three sources `entity_access` knows -
+/// so its users are the union of those, minus anyone who has left.
+#[sqlx::test(migrator = "MACRO_DB_MIGRATIONS")]
+async fn get_entity_users_resolves_agent_session_grants(pool: PgPool) -> anyhow::Result<()> {
+    const SESSION_OWNER: &str = "macro|session-owner@corp.test";
+    const CHANNEL_MEMBER: &str = "macro|channel-member@corp.test";
+    const DEPARTED_MEMBER: &str = "macro|departed-member@corp.test";
+    const TEAM_MEMBER: &str = "macro|team-member@corp.test";
+    const STRANGER: &str = "macro|stranger@corp.test";
+
+    let team_id = Uuid::new_v4();
+    let channel_id = Uuid::new_v4();
+    let session_id = Uuid::new_v4();
+    insert_team(&pool, team_id).await;
+    insert_team_channel(&pool, channel_id, team_id).await;
+    for (user, email) in [
+        (SESSION_OWNER, "session-owner@corp.test"),
+        (CHANNEL_MEMBER, "channel-member@corp.test"),
+        (DEPARTED_MEMBER, "departed-member@corp.test"),
+        (TEAM_MEMBER, "team-member@corp.test"),
+        (STRANGER, "stranger@corp.test"),
+    ] {
+        insert_user(&pool, user, email).await;
+    }
+    for (user, departed) in [(CHANNEL_MEMBER, false), (DEPARTED_MEMBER, true)] {
+        sqlx::query!(
+            r#"
+            INSERT INTO comms_channel_participants (channel_id, role, user_id, left_at)
+            VALUES ($1, 'member', $2, CASE WHEN $3 THEN now() ELSE NULL END)
+            "#,
+            channel_id,
+            user,
+            departed,
+        )
+        .execute(&pool)
+        .await?;
+    }
+    sqlx::query!(
+        r#"INSERT INTO team_user (user_id, team_id, team_role) VALUES ($1, $2, 'member')"#,
+        TEAM_MEMBER,
+        team_id,
+    )
+    .execute(&pool)
+    .await?;
+    for (source_id, source_type) in [
+        (SESSION_OWNER.to_string(), "user"),
+        (channel_id.to_string(), "channel"),
+        (team_id.to_string(), "team"),
+    ] {
+        sqlx::query!(
+            r#"
+            INSERT INTO entity_access (entity_id, entity_type, source_id, source_type, access_level)
+            VALUES ($1, 'agent_session', $2, $3::entity_access_source_type, 'view')
+            "#,
+            session_id,
+            source_id,
+            source_type as &str,
+        )
+        .execute(&pool)
+        .await?;
+    }
+
+    let users = get_entity_users(&pool, &session_id, EntityType::AgentSession).await?;
+    let ids: std::collections::HashSet<String> = users.iter().map(|u| u.to_string()).collect();
+
+    assert_eq!(
+        ids,
+        [SESSION_OWNER, CHANNEL_MEMBER, TEAM_MEMBER]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+    );
+    assert!(!ids.contains(DEPARTED_MEMBER));
+    assert!(!ids.contains(STRANGER));
+    Ok(())
+}

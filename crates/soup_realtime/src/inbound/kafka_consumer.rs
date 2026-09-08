@@ -14,6 +14,9 @@ use crate::domain::{
     ports::SoupRealtimeService,
     service::SoupRealtimeServiceImpl,
 };
+use agent_session::domain::events::{
+    AgentSessionLifecycleMacroEvent, AgentSessionLifecycleTopicEvent,
+};
 use channels::domain::{
     broker_events::{ChannelMacroEvent, ChannelTopicEvent},
     models::ReferencedShareItemType,
@@ -52,6 +55,7 @@ macro_event_broker::declare_topics!(
         EmailMacroEvent,
         ChannelMacroEvent,
         PropertyMacroEvent,
+        AgentSessionLifecycleMacroEvent,
 );
 
 fn entity(entity_type: EntityType, entity_id: impl ToString) -> Entity<'static> {
@@ -448,6 +452,25 @@ fn patches_from_property_event(event: &PropertyTopicEvent) -> Vec<SoupRealtimePa
     }
 }
 
+fn patches_from_agent_session_event(
+    event: &AgentSessionLifecycleTopicEvent,
+) -> Vec<SoupRealtimePatch> {
+    match event {
+        AgentSessionLifecycleTopicEvent::Created(metadata) => {
+            vec![update(EntityType::AgentSession, &metadata.agent_session_id)]
+        }
+        AgentSessionLifecycleTopicEvent::Renamed(metadata) => {
+            vec![update(EntityType::AgentSession, &metadata.agent_session_id)]
+        }
+        AgentSessionLifecycleTopicEvent::StatusChanged(metadata) => {
+            vec![update(EntityType::AgentSession, &metadata.agent_session_id)]
+        }
+        AgentSessionLifecycleTopicEvent::Deleted(metadata) => {
+            vec![delete(EntityType::AgentSession, &metadata.agent_session_id)]
+        }
+    }
+}
+
 fn patches_from_event(event: &DeclaredMacroEvent) -> Vec<SoupRealtimePatch> {
     match event {
         DeclaredMacroEvent::DocumentMacroEvent(event) => {
@@ -465,6 +488,9 @@ fn patches_from_event(event: &DeclaredMacroEvent) -> Vec<SoupRealtimePatch> {
         }
         DeclaredMacroEvent::PropertyMacroEvent(event) => {
             patches_from_property_event(&event.event().event)
+        }
+        DeclaredMacroEvent::AgentSessionLifecycleMacroEvent(event) => {
+            patches_from_agent_session_event(&event.event().event)
         }
     }
 }

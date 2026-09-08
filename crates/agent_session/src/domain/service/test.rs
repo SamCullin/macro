@@ -1,11 +1,17 @@
 use super::*;
 use crate::PROTOCOL_VERSION;
+use crate::domain::events::{
+    AgentSessionCreatedMetadata, AgentSessionDeletedMetadata, AgentSessionLifecycleTopicEvent,
+    AgentSessionRenamedMetadata, AgentSessionStatusChangedMetadata, SessionStatusMetadata,
+};
 use crate::domain::model::{
     DEFAULT_AGENT_SESSION_NAME, Message, ReplicaAddress, SessionBot, SessionManager,
 };
 use crate::domain::ports::NoOpRealtime;
 use crate::domain::session::HandshakeStatus;
-use crate::testing::{InMemoryAgentSessionRepo, RecordingRealtime, test_agent_session};
+use crate::testing::{
+    InMemoryAgentSessionRepo, RecordingLifecycleSink, RecordingRealtime, test_agent_session,
+};
 use agent_fold::domain::fold::fold;
 use agent_fold::domain::service::FoldedMessageService;
 use agent_fold::testing::{TURN, parse_log_as, test_session};
@@ -203,11 +209,13 @@ async fn manual_rename_trims_persists_and_publishes() {
     let session = test_session();
     repo.insert_session(test_agent_session(session));
     let realtime = RenameRealtime::default();
+    let lifecycle = RecordingLifecycleSink::new();
     let service = AgentSessionServiceImpl::new(
         repo.clone(),
         FoldedMessageService::new(repo.clone()),
         realtime.clone(),
-    );
+    )
+    .with_lifecycle_sink(Arc::new(lifecycle.clone()));
 
     service
         .rename_session(&owner_access(session), "  Fix Flaky Tests  ")
@@ -226,6 +234,67 @@ async fn manual_rename_trims_persists_and_publishes() {
             agent_session_id: session,
             name: "Fix Flaky Tests".to_owned(),
         }]
+    );
+    assert_eq!(
+        lifecycle.published(),
+        vec![AgentSessionLifecycleTopicEvent::Renamed(
+            AgentSessionRenamedMetadata {
+                agent_session_id: session.to_string(),
+                name: "Fix Flaky Tests".to_owned(),
+            }
+        )]
+    );
+}
+
+#[tokio::test]
+async fn creating_and_deleting_a_session_announce_its_lifecycle() {
+    let repo = InMemoryAgentSessionRepo::new();
+    let lifecycle = RecordingLifecycleSink::new();
+    let service = AgentSessionServiceImpl::new(
+        repo.clone(),
+        FoldedMessageService::new(repo.clone()),
+        NoOpRealtime,
+    )
+    .with_lifecycle_sink(Arc::new(lifecycle.clone()));
+    let template = test_agent_session(test_session());
+
+    let created = service
+        .create_session(CreateAgentSessionParams {
+            id: template.id,
+            owner_id: template.owner_id.clone(),
+            bot_id: template.bot_id,
+            thread_id: template.thread_id,
+            originating_message_id: template.originating_message_id,
+            model: template.model.clone(),
+            harness: template.harness.clone(),
+            repo_url: template.repo_url.clone(),
+            workspace: template.workspace.clone(),
+            sandbox_size: template.sandbox_size,
+            instructions: template.instructions.clone(),
+            mcp_servers: template.mcp_servers.clone(),
+            egress_token_hash: None,
+        })
+        .await
+        .expect("create session");
+    service
+        .delete_session(created.id)
+        .await
+        .expect("delete session");
+
+    assert_eq!(
+        lifecycle.published(),
+        vec![
+            AgentSessionLifecycleTopicEvent::Created(AgentSessionCreatedMetadata {
+                agent_session_id: created.id.to_string(),
+                owner: template.owner_id.clone(),
+                bot_id: template.bot_id.to_string(),
+                name: created.name.clone(),
+                thread_id: template.thread_id.map(|id| id.to_string()),
+            }),
+            AgentSessionLifecycleTopicEvent::Deleted(AgentSessionDeletedMetadata {
+                agent_session_id: created.id.to_string(),
+            }),
+        ]
     );
 }
 
@@ -287,10 +356,12 @@ async fn background_naming_persists_then_publishes_the_generated_name() {
     let session = test_session();
     repo.insert_session(test_agent_session(session));
     let realtime = RenameRealtime::default();
+    let lifecycle = RecordingLifecycleSink::new();
 
     spawn_initial_agent_session_rename(
         repo.clone(),
         realtime.clone(),
+        Arc::new(lifecycle.clone()),
         FixedNameGenerator,
         session,
         "fix the flaky tests".to_owned(),
@@ -320,6 +391,15 @@ async fn background_naming_persists_then_publishes_the_generated_name() {
             name: "Fix Flaky Tests".to_owned(),
         }]
     );
+    assert_eq!(
+        lifecycle.published(),
+        vec![AgentSessionLifecycleTopicEvent::Renamed(
+            AgentSessionRenamedMetadata {
+                agent_session_id: session.to_string(),
+                name: "Fix Flaky Tests".to_owned(),
+            }
+        )]
+    );
 }
 
 #[tokio::test]
@@ -330,10 +410,12 @@ async fn background_naming_does_not_overwrite_a_manual_name() {
     stored.name = "Manual Name".to_owned();
     repo.insert_session(stored);
     let realtime = RenameRealtime::default();
+    let lifecycle = RecordingLifecycleSink::new();
 
     spawn_initial_agent_session_rename(
         repo.clone(),
         realtime.clone(),
+        Arc::new(lifecycle.clone()),
         FixedNameGenerator,
         session,
         "fix the flaky tests".to_owned(),
@@ -353,6 +435,7 @@ async fn background_naming_does_not_overwrite_a_manual_name() {
             .expect("rename store is not poisoned")
             .is_empty()
     );
+    assert!(lifecycle.published().is_empty());
 }
 
 impl AgentSessionRepo for BlockingPromptLogs {
@@ -987,17 +1070,61 @@ async fn appending_persists_the_event() {
     assert_eq!(log.len(), 2);
 }
 
+/// Only system events move the session row's status, so only they are
+/// announced downstream; the ACP traffic that makes up most of a log is not.
+#[tokio::test]
+async fn only_system_event_frames_announce_a_status_change() {
+    let fx = fixture();
+    let lifecycle = RecordingLifecycleSink::new();
+    let mut logs = connection(fx.repo.clone()).with_lifecycle_sink(Arc::new(lifecycle.clone()));
+
+    let acp_frames: Vec<_> = parse_log_as(fx.session, TURN)
+        .into_iter()
+        .filter(|frame| {
+            !matches!(
+                frame.content,
+                Message::ToServer(ToServerMessage::Event { .. })
+            )
+        })
+        .collect();
+    assert!(!acp_frames.is_empty());
+    for frame in acp_frames {
+        AgentSessionLogWriter::append(&mut logs, frame)
+            .await
+            .expect("append succeeds");
+    }
+    assert!(lifecycle.published().is_empty());
+
+    AgentSessionLogWriter::append(&mut logs, any_event(fx.session))
+        .await
+        .expect("append succeeds");
+    assert_eq!(
+        lifecycle.published(),
+        vec![AgentSessionLifecycleTopicEvent::StatusChanged(
+            AgentSessionStatusChangedMetadata {
+                agent_session_id: fx.session.to_string(),
+                status: SessionStatusMetadata {
+                    status: "event".to_owned(),
+                    event_name: Some("acp_ready".to_owned()),
+                },
+            }
+        )]
+    );
+}
+
 #[tokio::test]
 async fn marking_disconnected_persists_and_publishes_the_event() {
     let repo = InMemoryAgentSessionRepo::new();
     let session = test_session();
     repo.insert_session(test_agent_session(session));
     let realtime = RecordingRealtime::new();
+    let lifecycle = RecordingLifecycleSink::new();
     let service = AgentSessionServiceImpl::new(
         repo.clone(),
         FoldedMessageService::new(repo.clone()),
         realtime.clone(),
-    );
+    )
+    .with_lifecycle_sink(Arc::new(lifecycle.clone()));
 
     service
         .mark_disconnected(session)
@@ -1020,6 +1147,18 @@ async fn marking_disconnected_persists_and_publishes_the_event() {
         }]
     ));
     assert_eq!(realtime.published().len(), 1);
+    assert_eq!(
+        lifecycle.published(),
+        vec![AgentSessionLifecycleTopicEvent::StatusChanged(
+            AgentSessionStatusChangedMetadata {
+                agent_session_id: session.to_string(),
+                status: SessionStatusMetadata {
+                    status: "event".to_owned(),
+                    event_name: Some("disconnected".to_owned()),
+                },
+            }
+        )]
+    );
 }
 
 #[tokio::test(start_paused = true)]

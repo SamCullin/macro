@@ -65,6 +65,11 @@ topics! {
     MacroChannelsTopic => "macro.channels",
     /// Signals telling the agent harness to open or feed an agent session.
     MacroAgentSessionsTopic => "macro.agent_sessions",
+    /// Agent session lifecycle events (created / renamed / status changed / deleted).
+    ///
+    /// Separate from [`MacroAgentSessionsTopic`], whose records are harness
+    /// trigger signals with their own schema and consumer.
+    MacroAgentSessionLifecycleTopic => "macro.agent_session_lifecycle",
     /// Email lifecycle events (links, messages, threads, labels).
     MacroEmailTopic => "macro.email",
     /// Webhook configuration lifecycle events (created / updated / deleted / validated).
