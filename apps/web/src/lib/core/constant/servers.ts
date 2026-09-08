@@ -1,6 +1,9 @@
 const serverHostLocal: Servers = {
   'auth-service': 'http://localhost:8080',
-  'auth-logout': 'http://localhost:3000', // TODO: make work with local fusionauth later
+  // Logout is completed by auth-service before the browser is redirected. Use
+  // the app login route here so a same-origin/proxy deployment never sends a
+  // user to the operator's own localhost.
+  'auth-logout': '/app/login',
   'pdf-service': 'http://localhost:4567',
   'document-storage-service': 'http://localhost:8086',
   'websocket-service': 'ws://localhost:6969',
