@@ -4,7 +4,6 @@ const serverHostLocal: Servers = {
   // the app login route here so a same-origin/proxy deployment never sends a
   // user to the operator's own localhost.
   'auth-logout': '/app/login',
-  'pdf-service': 'http://localhost:4567',
   'document-storage-service': 'http://localhost:8086',
   'websocket-service': 'ws://localhost:6969',
   'cognition-service': 'http://localhost:8085',
@@ -34,7 +33,6 @@ const authLogoutUrl =
 const serverHostRemote = {
   'auth-service': `${gatewayHost}/auth`,
   'auth-logout': authLogoutUrl,
-  'pdf-service': `https://pdf-service${devServerSuffix}.macro.com`,
   'document-storage-service': `${gatewayHost}/dss`,
   'websocket-service': `wss://services${devServerSuffix}.macro.com`,
   'cognition-service': `https://document-cognition${devServerSuffix}.macro.com`,
@@ -96,7 +94,6 @@ function proxyServers(): Servers | undefined {
   return {
     'auth-service': `${proxyOrigin}/auth`,
     'auth-logout': serverHostLocal['auth-logout'],
-    'pdf-service': serverHostLocal['pdf-service'], // no local container
     'document-storage-service': `${proxyOrigin}/dss`,
     'websocket-service': `${wsProxyOrigin}/websocket`,
     'cognition-service': `${proxyOrigin}/cognition`,
