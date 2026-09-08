@@ -549,6 +549,7 @@ async fn run() -> anyhow::Result<()> {
             sync_app_client_id: config.github_sync_app_client_id.to_string(),
             sync_app_client_secret: config.github_sync_app_client_secret.to_string(),
             installation_state_secret: config.github_installation_state_secret.to_string(),
+            app_base_url: config.app_base_url.to_string(),
         },
         document_service.clone(),
         foreign_entity_service.clone(),

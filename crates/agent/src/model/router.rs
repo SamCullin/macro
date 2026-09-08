@@ -15,13 +15,14 @@
 //! `groq/llama-3.3-70b`); routing picks the provider from the segment, never by
 //! sniffing the id. Unroutable ids fall back to the default model.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use ai_toolset::{RequestContext, SearchableTool};
 use ai_usage::{UsageContext, UsageRecorder};
 use futures::StreamExt;
-use macro_env_var::{env_var, maybe_env_var};
+use macro_env_var::{maybe_env_var, maybe_env_vars};
 use rig_agent::agent::{Agent, AgentBuilder, MultiTurnStreamItem};
 use rig_agent::streaming::StreamingPrompt;
 use rig_agent::tool::server::ToolServerHandle;
@@ -38,12 +39,10 @@ use crate::error::AgentError;
 use crate::hook::{RegisterFn, StreamBridge, ToolRouter};
 use crate::stream::{ChatCompletionStream, StreamPart};
 
-env_var! {
-    struct ApiKeys {
-        AnthropicApiKey,
-        OpenaiApiKey,
-        CerebrasApiKey
-    }
+maybe_env_vars! {
+    struct AnthropicApiKey;
+    struct OpenaiApiKey;
+    struct CerebrasApiKey;
 }
 
 maybe_env_var! {
@@ -240,8 +239,8 @@ impl ProviderAgent {
 /// providers with [`with_openai_provider`](Self::with_openai_provider).
 #[derive(Clone)]
 pub struct ModelRouter {
-    anthropic: Arc<anthropic::Client>,
-    openai: Arc<openai::Client>,
+    anthropic: Option<Arc<anthropic::Client>>,
+    openai: Option<Arc<openai::Client>>,
     openai_compatible: HashMap<String, Arc<openai::CompletionsClient>>,
 }
 
@@ -250,48 +249,79 @@ impl ModelRouter {
     /// no OpenAI-compatible Chat Completions providers registered yet.
     pub fn new(anthropic: anthropic::Client, openai: openai::Client) -> Self {
         Self {
-            anthropic: Arc::new(anthropic),
-            openai: Arc::new(openai),
+            anthropic: Some(Arc::new(anthropic)),
+            openai: Some(Arc::new(openai)),
             openai_compatible: HashMap::new(),
         }
     }
 
     /// Build a router with the built-in providers from the environment.
     ///
-    /// Requires `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `CEREBRAS_API_KEY`.
-    /// Chain [`with_openai_provider`](Self::with_openai_provider) to add more.
+    /// Builds every provider whose credentials are configured. The native
+    /// providers are optional so a deployment can use an OpenAI-compatible
+    /// gateway such as LiteLLM without carrying fake direct-provider keys.
     pub fn try_from_env() -> Result<Self, AgentError> {
-        let env = ApiKeys::new()?;
-        let anthropic = anthropic::Client::builder()
-            .api_key(env.anthropic_api_key.to_string())
-            .build()?;
+        let anthropic = AnthropicApiKey::new()
+            .and_then(|key| {
+                key.value()
+                    .map(str::to_owned)
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .map(|api_key| anthropic::Client::builder().api_key(api_key).build())
+            .transpose()?;
         // Default base URL is api.openai.com; OpenAI's GPT models use
         // Responses API so reasoning models get max_output_tokens.
-        let openai = openai::Client::builder()
-            .api_key(env.openai_api_key.to_string())
-            .build()?;
+        let openai = OpenaiApiKey::new()
+            .and_then(|key| {
+                key.value()
+                    .map(str::to_owned)
+                    .filter(|value| !value.trim().is_empty())
+            })
+            .map(|api_key| openai::Client::builder().api_key(api_key).build())
+            .transpose()?;
+
+        let mut router = Self {
+            anthropic: anthropic.map(Arc::new),
+            openai: openai.map(Arc::new),
+            openai_compatible: HashMap::new(),
+        };
+
         // Cerebras speaks the OpenAI Chat Completions API, so it rides the
         // compatible-provider registry: `cerebras/<model>` ids route to it.
-        let router = Self::new(anthropic, openai).with_openai_provider(
-            CEREBRAS_PROVIDER,
-            CEREBRAS_BASE_URL,
-            &env.cerebras_api_key,
-        )?;
+        if let Some(api_key) = CerebrasApiKey::new().and_then(|key| {
+            key.value()
+                .map(str::to_owned)
+                .filter(|value| !value.trim().is_empty())
+        }) {
+            router = router.with_openai_provider(CEREBRAS_PROVIDER, CEREBRAS_BASE_URL, &api_key)?;
+        }
 
         let Some(api_key) = LitellmApiKey::new()
             .and_then(|key| key.value().map(str::to_owned))
             .filter(|key| !key.is_empty())
         else {
-            return Ok(router);
+            return if router.has_provider() {
+                Ok(router)
+            } else {
+                Err(anyhow::anyhow!("configure at least one AI provider credential").into())
+            };
         };
         let Some(base_url) = LitellmBaseUrl::new()
             .and_then(|url| url.value().map(str::to_owned))
             .filter(|url| !url.is_empty())
         else {
-            return Ok(router);
+            return if router.has_provider() {
+                Ok(router)
+            } else {
+                Err(
+                    anyhow::anyhow!("LITELLM_API_KEY is set but LITELLM_BASE_URL is missing")
+                        .into(),
+                )
+            };
         };
 
-        router.with_openai_provider(LITELLM_PROVIDER, &base_url, &api_key)
+        router = router.with_openai_provider(LITELLM_PROVIDER, &base_url, &api_key)?;
+        Ok(router)
     }
 
     /// The process-wide full router, built from the environment on first use.
@@ -364,16 +394,22 @@ impl ModelRouter {
         let parsed = Model::try_from(model)?;
 
         if parsed.provider() == ANTHROPIC_PROVIDER {
-            return Ok(RoutedModel::Anthropic(AnthropicModel::new(
-                parsed,
-                self.anthropic.clone(),
-            )));
+            if let Some(client) = &self.anthropic {
+                return Ok(RoutedModel::Anthropic(AnthropicModel::new(
+                    parsed,
+                    Arc::clone(client),
+                )));
+            }
+            return self.route_through_litellm(parsed);
         }
         if parsed.provider() == OPENAI_PROVIDER {
-            return Ok(RoutedModel::OpenAiResponses(OpenAiResponsesModel::new(
-                parsed,
-                self.openai.clone(),
-            )));
+            if let Some(client) = &self.openai {
+                return Ok(RoutedModel::OpenAiResponses(OpenAiResponsesModel::new(
+                    parsed,
+                    Arc::clone(client),
+                )));
+            }
+            return self.route_through_litellm(parsed);
         }
         if let Some(client) = self.openai_compatible.get(parsed.provider()) {
             let client = Arc::clone(client);
@@ -382,6 +418,23 @@ impl ModelRouter {
             ));
         }
         Err(AgentError::UnknownModel(model.to_string()))
+    }
+
+    fn route_through_litellm<'a>(&self, parsed: Model<'a>) -> Result<RoutedModel<'a>, AgentError> {
+        let Some(client) = self.openai_compatible.get(LITELLM_PROVIDER) else {
+            return Err(AgentError::UnknownModel(parsed.to_string()));
+        };
+        let model = Model {
+            provider: Cow::Borrowed(LITELLM_PROVIDER),
+            name: Cow::Owned(parsed.to_string()),
+        };
+        Ok(RoutedModel::OpenAiChatCompletions(
+            OpenAiChatCompletionsModel::new(model, Arc::clone(client)),
+        ))
+    }
+
+    fn has_provider(&self) -> bool {
+        self.anthropic.is_some() || self.openai.is_some() || !self.openai_compatible.is_empty()
     }
 
     /// Route `model`, falling back to the default model on an unroutable id.
@@ -395,10 +448,33 @@ impl ModelRouter {
     /// bare api id — `PredefinedModel`'s `Display` is the provider-qualified
     /// routing id, which the Anthropic API rejects as a model name.
     fn default_model(&self) -> RoutedModel<'static> {
-        RoutedModel::Anthropic(AnthropicModel::new(
-            PredefinedModel::Smart.into(),
-            self.anthropic.clone(),
-        ))
+        if let Some(client) = &self.anthropic {
+            return RoutedModel::Anthropic(AnthropicModel::new(
+                PredefinedModel::Smart.into(),
+                Arc::clone(client),
+            ));
+        }
+        if let Some(client) = self.openai_compatible.get(LITELLM_PROVIDER) {
+            let model = Model {
+                provider: Cow::Borrowed(LITELLM_PROVIDER),
+                name: Cow::Borrowed("anthropic/claude-sonnet-5"),
+            };
+            return RoutedModel::OpenAiChatCompletions(OpenAiChatCompletionsModel::new(
+                model,
+                Arc::clone(client),
+            ));
+        }
+        if let Some(client) = &self.openai {
+            let model = Model {
+                provider: Cow::Borrowed(OPENAI_PROVIDER),
+                name: Cow::Borrowed("gpt-5.5"),
+            };
+            return RoutedModel::OpenAiResponses(OpenAiResponsesModel::new(
+                model,
+                Arc::clone(client),
+            ));
+        }
+        unreachable!("ModelRouter::try_from_env rejects an empty provider set")
     }
 }
 

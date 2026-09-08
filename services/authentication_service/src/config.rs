@@ -17,6 +17,8 @@ pub static BASE_URL: LazyLock<String> = LazyLock::new(|| {
 
 env_vars! {
     pub struct BaseUrl;
+    /// Public Macro application origin used for OAuth return URLs.
+    pub struct AppBaseUrl;
     pub struct FusionAuthApiSecretKey;
     pub struct FusionAuthClientId;
     pub struct FusionAuthClientSecretKey;
@@ -78,6 +80,8 @@ maybe_env_vars! {
 pub struct Config {
     #[allow(dead_code)]
     pub base_url: BaseUrl,
+    /// Public Macro application origin used for OAuth return URLs.
+    pub app_base_url: AppBaseUrl,
     /// The connection URL for the Postgres database this application should use.
     pub database_url: DatabaseUrl,
     /// The Redis URI for the Redis this application should use.

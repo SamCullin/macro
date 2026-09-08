@@ -433,6 +433,7 @@ impl ServiceAuthEnv {
 struct FusionAuthEnv {
     oauth_redirect_uri: String,
     public_url: String,
+    app_base_url: String,
     /// The auth service's own public origin (`BASE_URL`): OAuth callbacks and
     /// email verification links are built on it. Same host-port convention as
     /// [`identity::oauth_redirect_uri`]. Doppler supplies it for dev; the
@@ -446,12 +447,14 @@ impl FusionAuthEnv {
         FusionAuthEnv {
             oauth_redirect_uri: identity::oauth_redirect_uri(instance.port(Port::Auth)),
             public_url: format!("http://localhost:{}", instance.port(Port::FusionAuth)),
+            app_base_url: format!("http://localhost:{}", instance.port(Port::Frontend)),
             base_url: format!("http://localhost:{}", instance.port(Port::Auth)),
         }
     }
 
     fn write(&self, env: &mut BTreeMap<String, String>) {
         env.insert("BASE_URL".into(), self.base_url.clone());
+        env.insert("APP_BASE_URL".into(), self.app_base_url.clone());
         env.insert(
             "FUSIONAUTH_BASE_URL".into(),
             "http://fusionauth:9011".into(),

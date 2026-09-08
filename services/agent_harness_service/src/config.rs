@@ -1,9 +1,10 @@
 //! Configuration for the agent harness service, loaded via the standard
 //! `macro_config` pattern so it gets a `doppler_config` validation binary.
 //!
-//! Required env vars are declared here as typed fields. The `doppler_config`
-//! binary loads this `Config` from Doppler for both the dev and prod
-//! environments, surfacing any missing or mistyped values at CI time.
+//! Required and optional env vars are declared here as typed fields. The
+//! `doppler_config` binary loads this `Config` from Doppler for both the dev
+//! and prod environments, surfacing any missing or mistyped required values
+//! at CI time.
 
 use anyhow::Context;
 use database_env_vars::{DatabaseUrl, RedisUri};
@@ -25,13 +26,14 @@ macro_env_var::env_vars!(
     /// Issuer stamped into minted Macro API tokens; must match what the
     /// validators expect.
     pub struct MacroApiTokenIssuer;
-    /// OAuth client ID for the Pipedream API. The same credentials
-    /// `document_cognition_service` uses: the connections a sandbox spends
-    /// are the ones the person connected in Macro, in the same rows.
+);
+
+macro_env_var::maybe_env_vars!(
+    /// OAuth client ID for the optional Pipedream API integration.
     pub struct PipedreamClientId;
-    /// OAuth client secret for the Pipedream API.
+    /// OAuth client secret for the optional Pipedream API integration.
     pub struct PipedreamClientSecret;
-    /// The Pipedream Connect project ID (`proj_...`).
+    /// Pipedream Connect project ID for the optional integration.
     pub struct PipedreamProjectId;
 );
 

@@ -24,6 +24,8 @@ env_vars! {
     pub struct OpensearchUsername;
     pub struct OpensearchPassword;
     pub struct GithubSyncAppUrl;
+    /// Public Macro base URL used in links posted by GitHub sync.
+    pub struct AppBaseUrl;
     pub struct GithubSyncAppClientId;
     pub struct GithubInstallationStateSecret;
     pub struct GithubSyncAppClientSecret;
@@ -102,6 +104,7 @@ pub struct Config {
     pub opensearch_username: OpensearchUsername,
     pub opensearch_password: OpensearchPassword,
     pub github_sync_app_url: GithubSyncAppUrl,
+    pub app_base_url: AppBaseUrl,
     pub github_sync_app_client_id: GithubSyncAppClientId,
     pub github_installation_state_secret: GithubInstallationStateSecret,
     pub github_sync_app_client_secret: GithubSyncAppClientSecret,

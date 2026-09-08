@@ -28,7 +28,6 @@ use foreign_entity::domain::{
     ports::ForeignEntityService,
 };
 use hmac::{Hmac, Mac};
-use macro_env_var::maybe_env_vars;
 use notification::domain::service::NotificationIngress;
 use sha2::Sha256;
 use std::{
@@ -38,10 +37,6 @@ use std::{
 use subtle::ConstantTimeEq;
 
 type HmacSha256 = Hmac<Sha256>;
-
-maybe_env_vars! {
-    struct FrontendPort;
-}
 
 /// Github sync config
 #[derive(Debug)]
@@ -58,6 +53,8 @@ pub struct GithubSyncConfig {
     pub sync_app_client_secret: String,
     /// Secret used to sign installation setup state carried through GitHub.
     pub installation_state_secret: String,
+    /// Public Macro base URL used in task links posted back to GitHub.
+    pub app_base_url: String,
 }
 
 /// The concrete github sync service implementation.
@@ -769,7 +766,11 @@ impl<
                         tracing::trace!(task_id=%uuid, doc_id, doc_name, "resolved task document");
 
                         doc_ids.push(doc_id.clone());
-                        task_links.push(create_macro_task_comment_link(doc_name, doc_id));
+                        task_links.push(create_macro_task_comment_link(
+                            &self.config.app_base_url,
+                            doc_name,
+                            doc_id,
+                        ));
                         validated_task_ids.push(task_id.clone());
                     } else {
                         tracing::trace!(task_id=%uuid, "document found but is not a task, skipping");
@@ -1165,17 +1166,6 @@ fn dedupe_task_ids(task_ids: Vec<MacroTaskId>) -> Vec<MacroTaskId> {
 }
 
 /// Creates a macro task comment given the document name and id
-fn create_macro_task_comment_link(name: &str, id: &str) -> String {
-    let url = match macro_env::Environment::new_or_prod() {
-        macro_env::Environment::Production => "https://macro.com/app/task",
-        macro_env::Environment::Develop => "https://dev.macro.com/app/task",
-        macro_env::Environment::Local => {
-            let port = FrontendPort::new()
-                .map(|port| port.to_string())
-                .unwrap_or_else(|| "3000".to_string());
-            return format!("[{name}](http://localhost:{port}/app/task/{id})");
-        }
-    };
-
-    format!("[{name}]({url}/{id})")
+fn create_macro_task_comment_link(base_url: &str, name: &str, id: &str) -> String {
+    format!("[{name}]({}/app/task/{id})", base_url.trim_end_matches('/'))
 }

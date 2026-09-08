@@ -21,6 +21,7 @@ fn emits_required_keys() {
         "ENVIRONMENT",
         "PORT",
         "BASE_URL",
+        "APP_BASE_URL",
         "DATABASE_URL",
         "DATABASE_URL_READONLY",
         "REDIS_URI",

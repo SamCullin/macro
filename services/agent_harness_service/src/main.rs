@@ -99,7 +99,10 @@ use macro_event_broker::{
     MacroEventCollection as _, MacroEventConsumerService,
 };
 use macro_service_urls::{ConnectionGatewayUrl, LexicalServiceUrl};
-use pipedream_mcp::outbound::api::{PipedreamClient, PipedreamConfig};
+use pipedream_mcp::domain::models::PipedreamConnection;
+use pipedream_mcp::outbound::api::{
+    McpUpstream, McpUpstreamCall, PipedreamClient, PipedreamConfig,
+};
 use pipedream_mcp::outbound::pg_connection_repo::PgConnectionRepo;
 use rdkafka::consumer::CommitMode;
 use rdkafka::message::{BorrowedMessage, Message as _};
@@ -115,6 +118,25 @@ use runtime_commands::consume_runtime_commands;
 /// split partitions between them and each miss half its events; fine while
 /// exactly one harness deployment exists.
 struct AgentHarnessConsumerGroup;
+
+/// The Pipedream egress adapter is optional, matching the document cognition
+/// service. Keeping the disabled state explicit lets Macro's own MCP server
+/// and GitHub egress run without inventing a project credential.
+enum PipedreamEgressUpstream {
+    Configured(PipedreamClient),
+    Disabled,
+}
+
+impl McpUpstream for PipedreamEgressUpstream {
+    async fn upstream(&self, record: &PipedreamConnection) -> anyhow::Result<McpUpstreamCall> {
+        match self {
+            Self::Configured(client) => client.upstream(record).await,
+            Self::Disabled => anyhow::bail!(
+                "Pipedream MCP connectors are disabled: configure PIPEDREAM_CLIENT_ID, PIPEDREAM_CLIENT_SECRET, and PIPEDREAM_PROJECT_ID"
+            ),
+        }
+    }
+}
 
 const RUNTIME_COMMAND_CONSUMER_ATTEMPTS: usize = 5;
 
@@ -274,18 +296,43 @@ async fn run() -> anyhow::Result<()> {
 
     // The client that addresses Pipedream's remote MCP server, built from the
     // same credentials `document_cognition_service` uses.
-    let pipedream = PipedreamClient::new(PipedreamConfig {
-        client_id: config.pipedream_client_id.to_string(),
-        client_secret: config.pipedream_client_secret.to_string(),
-        project_id: config.pipedream_project_id.to_string(),
-        environment: config.pipedream_environment.clone(),
-        api_url: config.pipedream_api_url.clone(),
-        mcp_url: config.pipedream_mcp_url.clone(),
-        // Only Connect tokens carry allowed origins, and this service never
-        // mints one: connecting apps stays in the app.
-        allowed_origins: Vec::new(),
-    })
-    .context("failed to build Pipedream client")?;
+    let pipedream = match (
+        config
+            .pipedream_client_id
+            .value()
+            .filter(|value| !value.trim().is_empty()),
+        config
+            .pipedream_client_secret
+            .value()
+            .filter(|value| !value.trim().is_empty()),
+        config
+            .pipedream_project_id
+            .value()
+            .filter(|value| !value.trim().is_empty()),
+    ) {
+        (Some(client_id), Some(client_secret), Some(project_id)) => {
+            PipedreamEgressUpstream::Configured(
+                PipedreamClient::new(PipedreamConfig {
+                    client_id: client_id.to_owned(),
+                    client_secret: client_secret.to_owned(),
+                    project_id: project_id.to_owned(),
+                    environment: config.pipedream_environment.clone(),
+                    api_url: config.pipedream_api_url.clone(),
+                    mcp_url: config.pipedream_mcp_url.clone(),
+                    // Only Connect tokens carry allowed origins, and this service never
+                    // mints one: connecting apps stays in the app.
+                    allowed_origins: Vec::new(),
+                })
+                .context("failed to build Pipedream client")?,
+            )
+        }
+        _ => {
+            tracing::warn!(
+                "Pipedream credentials not set; Pipedream MCP connectors disabled for agent egress"
+            );
+            PipedreamEgressUpstream::Disabled
+        }
+    };
 
     // Every session's MCP servers: Macro's own under the reserved `macro`
     // slug, then the owner's Pipedream connections. The `macro` credential is
