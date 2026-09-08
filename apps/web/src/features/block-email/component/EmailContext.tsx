@@ -52,7 +52,10 @@ import {
   invalidateAllSoup,
   refetchSoupEntity,
 } from '@queries/soup/cache';
-import { mapApiSoupItemToEntity } from '@queries/soup/transform-utils';
+import {
+  isDisplayableSoupItem,
+  mapApiSoupItemToEntity,
+} from '@queries/soup/transform-utils';
 import type { UndoHandle } from '@queries/undo';
 import type {
   ApiMessage,
@@ -562,6 +565,7 @@ export function EmailProvider(props: FlowProps<{ threadID: string }>) {
     const entity =
       selectedRow?.original ??
       (cachedItem &&
+      isDisplayableSoupItem(cachedItem) &&
       cachedItem.tag !== 'channelThread' &&
       cachedItem.tag !== 'calendarEvent'
         ? mapApiSoupItemToEntity(cachedItem)
@@ -665,6 +669,7 @@ export function EmailProvider(props: FlowProps<{ threadID: string }>) {
       );
     } else if (
       cachedItem &&
+      isDisplayableSoupItem(cachedItem) &&
       cachedItem.tag !== 'channelThread' &&
       cachedItem.tag !== 'calendarEvent'
     ) {
