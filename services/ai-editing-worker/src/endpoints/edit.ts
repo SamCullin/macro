@@ -18,8 +18,14 @@ import { insertEditTrace } from '../traces-db';
 type Provider = 'anthropic' | 'cerebras' | 'openai';
 
 const PROVIDERS = {
-  anthropic: { key: 'ANTHROPIC_API_KEY', create: createAnthropic },
-  cerebras: { key: 'CEREBRAS_API_KEY', create: createCerebras },
+  anthropic: {
+    key: 'ANTHROPIC_API_KEY',
+    create: ({ apiKey }: { apiKey: string }) => createAnthropic({ apiKey }),
+  },
+  cerebras: {
+    key: 'CEREBRAS_API_KEY',
+    create: ({ apiKey }: { apiKey: string }) => createCerebras({ apiKey }),
+  },
   // `.chat()` pins OpenAI to Chat Completions. The default factory uses the
   // Responses API, which references reasoning items across steps by id — and
   // this org has Zero Data Retention, so those ids are never persisted. Every
@@ -31,7 +37,7 @@ const PROVIDERS = {
   // exactly when it is needed.
   openai: {
     key: 'OPENAI_API_KEY',
-    create: (opts: { apiKey: string }) => {
+    create: (opts: { apiKey: string; baseURL?: string }) => {
       const provider = createOpenAI(opts);
       return (modelId: string) => provider.chat(modelId);
     },
@@ -40,7 +46,7 @@ const PROVIDERS = {
   Provider,
   {
     key: keyof Bindings;
-    create: (opts: { apiKey: string }) => (modelId: string) => LanguageModel;
+    create: (opts: { apiKey: string; baseURL?: string }) => (modelId: string) => LanguageModel;
   }
 >;
 
@@ -85,7 +91,10 @@ function buildModels(
 ): ResolvedModels {
   const resolveOne = ({ provider, model }: Model) => {
     const apiKey = env[PROVIDERS[provider].key];
-    return PROVIDERS[provider].create({ apiKey })(model);
+    return PROVIDERS[provider].create({
+      apiKey,
+      baseURL: provider === 'openai' ? env.OPENAI_BASE_URL || undefined : undefined,
+    })(model);
   };
   const resolveModel = (specs: Model[]): LanguageModel => {
     const resolved = specs.map(resolveOne);

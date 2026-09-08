@@ -77,6 +77,9 @@ maybe_env_vars! {
     /// Optional Meta test event code — routes events to Meta's test events
     /// view instead of production tracking.
     pub struct MetaTestEventCode;
+    /// Optional OpenAI-compatible base URL for task-dedup embeddings.
+    /// When unset, the embedder uses OpenAI's public API.
+    pub struct OpenaiBaseUrl;
 }
 
 /// The configuration parameters for the application.
