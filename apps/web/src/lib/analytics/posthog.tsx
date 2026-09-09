@@ -16,24 +16,30 @@ export const [PosthogProvider, usePosthog] = createAssertedContextProvider(
   () => {
     const analytics = useAnalytics();
 
+    const hasFeatureFlagProvider = Boolean(analytics.posthog.config.token);
     const [featureFlags, setFeatureFlags] = createSignal<string[]>([]);
     // Distinguishes "flags not fetched yet" from "no flags enabled": both
     // leave featureFlags empty, but destructive flag-off fallbacks (e.g.
     // RedirectSplit) must not fire before the answer arrives. Set even on
     // errorsLoading so a PostHog outage degrades to flags-off, not a hang.
-    const [flagsLoaded, setFlagsLoaded] = createSignal(false);
+    // PostHog is optional for self-hosted deployments. Without a token the
+    // SDK never emits `onFeatureFlags`, so treating that state as loaded keeps
+    // feature-gated views from remaining on an infinite loading screen.
+    const [flagsLoaded, setFlagsLoaded] = createSignal(!hasFeatureFlagProvider);
 
-    const unsub = analytics.posthog.onFeatureFlags((flags, _, ctx) => {
-      // Order matters: signals propagate synchronously, so flagsLoaded must
-      // only flip after the flag values are in place — the other way around,
-      // flag-off fallbacks fire against the still-empty flag list.
-      if (!ctx?.errorsLoading) {
-        setFeatureFlags(flags);
-      }
-      setFlagsLoaded(true);
-    });
+    const unsub = hasFeatureFlagProvider
+      ? analytics.posthog.onFeatureFlags((flags, _, ctx) => {
+          // Order matters: signals propagate synchronously, so flagsLoaded must
+          // only flip after the flag values are in place — the other way around,
+          // flag-off fallbacks fire against the still-empty flag list.
+          if (!ctx?.errorsLoading) {
+            setFeatureFlags(flags);
+          }
+          setFlagsLoaded(true);
+        })
+      : undefined;
 
-    onCleanup(unsub);
+    onCleanup(() => unsub?.());
 
     return { instance: analytics.posthog, featureFlags, flagsLoaded };
   }
