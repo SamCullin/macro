@@ -20,7 +20,8 @@ use models_properties::EntityType;
 use sqs_client::search::SearchQueueMessage;
 
 use super::models::{
-    BackfillError, CalendarEventBackfillCursor, CalendarEventBackfillRequest, CallBackfillCursor,
+    AgentSessionBackfillCursor, AgentSessionBackfillRequest, BackfillError,
+    CalendarEventBackfillCursor, CalendarEventBackfillRequest, CallBackfillCursor,
     CallBackfillRequest, ChannelBackfillRequest, ChatBackfillCursor, ChatBackfillRequest,
     DocumentBackfillCursor, DocumentBackfillRequest, EmailBackfillRequest, ProjectBackfillCursor,
     ProjectBackfillRequest, PropertiesBackfillRequest, PropertySourcePage, SourcePage,
@@ -53,6 +54,16 @@ pub trait PropertyBackfillIndexer: Send + Sync + 'static {
 /// per user) must report the row count separately so the loop offsets
 /// correctly.
 pub trait BackfillSource: Send + Sync + 'static {
+    /// Agent sessions paginate by the authoritative row's `(modified_at, id)`
+    /// tuple. Queue consumers subsequently reread and fold the complete log.
+    fn fetch_agent_sessions(
+        &self,
+        req: &AgentSessionBackfillRequest,
+        cursor: Option<AgentSessionBackfillCursor>,
+    ) -> impl Future<
+        Output = Result<(SourcePage, Option<AgentSessionBackfillCursor>), BackfillError>,
+    > + Send;
+
     /// Calls paginate by keyset cursor (mirroring documents/chats): the
     /// implementation returns the page plus the cursor of the last row
     /// to feed back into the next call. An empty page signals

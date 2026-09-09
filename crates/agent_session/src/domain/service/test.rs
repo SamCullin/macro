@@ -6,8 +6,8 @@ use crate::domain::model::{
 use crate::domain::ports::NoOpRealtime;
 use crate::domain::session::HandshakeStatus;
 use crate::testing::{InMemoryAgentSessionRepo, RecordingRealtime, test_agent_session};
-use agent_fold::domain::fold::fold;
 use agent_fold::domain::service::FoldedMessageService;
+use agent_fold::domain::{fold::fold, model::Author};
 use agent_fold::testing::{TURN, parse_log_as, test_session};
 use agent_runtime_protocol::domain::ports::{
     Transport, TransportError, TransportReceiver, TransportSender,
@@ -16,6 +16,8 @@ use agent_runtime_protocol::domain::schema::v0::ToRuntimeMessage;
 use agent_runtime_protocol::domain::schema::v0::{AcpMessage, ToServerMessage};
 use entity_access::domain::models::{EntityAccessReceipt, EntityType, OwnerAccessLevel};
 use macro_uuid::Uuid;
+use non_empty::NonEmpty;
+use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 use tracing::instrument::WithSubscriber as _;
@@ -291,6 +293,7 @@ async fn background_naming_persists_then_publishes_the_generated_name() {
     spawn_initial_agent_session_rename(
         repo.clone(),
         realtime.clone(),
+        Arc::new(NoOpAgentSessionSearchEvents),
         FixedNameGenerator,
         session,
         "fix the flaky tests".to_owned(),
@@ -334,6 +337,7 @@ async fn background_naming_does_not_overwrite_a_manual_name() {
     spawn_initial_agent_session_rename(
         repo.clone(),
         realtime.clone(),
+        Arc::new(NoOpAgentSessionSearchEvents),
         FixedNameGenerator,
         session,
         "fix the flaky tests".to_owned(),
@@ -1559,3 +1563,32 @@ async fn assert_restore_persistence_failure_does_not_send_prompt(failure: Restor
 }
 
 mod owner_binding;
+
+fn folded_event_message(author: Author) -> agent_fold::domain::model::FoldedMessage {
+    agent_fold::domain::model::FoldedMessage {
+        id: agent_fold::domain::model::TurnId(0),
+        author,
+        request_id: None,
+        parts: NonEmpty::new(vec![agent_fold::domain::model::MessagePart::Text {
+            text: "visible".to_owned(),
+        }])
+        .expect("test message has one part"),
+        stop: None,
+    }
+}
+
+#[test]
+fn search_reconciles_only_at_stable_fold_checkpoints() {
+    let user = folded_event_message(Author::User { user_id: None });
+    let agent = folded_event_message(Author::Agent);
+
+    assert!(fold_events_need_search_reconcile(&[FoldEvent::NewMessage(
+        Cow::Borrowed(&user),
+    )]));
+    assert!(!fold_events_need_search_reconcile(&[
+        FoldEvent::MessageUpdate(Cow::Borrowed(&agent)),
+    ]));
+    assert!(fold_events_need_search_reconcile(&[
+        FoldEvent::MessagesReplaced(Cow::Borrowed(&[])),
+    ]));
+}

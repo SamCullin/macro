@@ -7,6 +7,7 @@ use agent_runtime_protocol::domain::schema::v0::{ToRuntimeMessage, ToServerMessa
 use bots::domain::models::BotId;
 use macro_user_id::user_id::MacroUserIdStr;
 use macro_uuid::Uuid;
+use std::pin::Pin;
 
 /// A bidirectional connection to an agent runtime.
 pub trait AgentConnector:
@@ -542,6 +543,46 @@ pub trait AgentSessionRealtime {
     }
 }
 
+/// Publishes identifier-only invalidations for the rebuildable search view.
+///
+/// This port is deliberately object-safe so adding search projection updates
+/// does not spread another type parameter through the live actor stack. The
+/// durable ACP log remains authoritative; a notification only tells a consumer
+/// to reread and refold it.
+pub trait AgentSessionSearchEvents: Send + Sync + 'static {
+    /// Session metadata or folded transcript changed.
+    fn reconcile(
+        &self,
+        id: AgentSessionId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), rootcause::Report>> + Send + '_>>;
+
+    /// Session was permanently deleted.
+    fn deleted(
+        &self,
+        id: AgentSessionId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), rootcause::Report>> + Send + '_>>;
+}
+
+/// Search invalidations disabled, for tests and offline tools.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct NoOpAgentSessionSearchEvents;
+
+impl AgentSessionSearchEvents for NoOpAgentSessionSearchEvents {
+    fn reconcile(
+        &self,
+        _id: AgentSessionId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), rootcause::Report>> + Send + '_>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn deleted(
+        &self,
+        _id: AgentSessionId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), rootcause::Report>> + Send + '_>> {
+        Box::pin(async { Ok(()) })
+    }
+}
+
 /// Told when a session's turn ends and when its live actor stops.
 ///
 /// What the harness gates its prompt queue on: a turn ending means the agent
@@ -560,6 +601,33 @@ pub trait SessionTurnObserver: Send + Sync + 'static {
     /// The session's live actor is gone - disconnect, teardown, or crash. Any
     /// in-flight turn went with it, without [`Self::turn_ended`] firing.
     fn session_stopped(&self, id: AgentSessionId);
+}
+
+/// Hands turn lifecycle facts to several observers in declaration order.
+pub struct FanoutTurnObserver {
+    observers: Vec<std::sync::Arc<dyn SessionTurnObserver>>,
+}
+
+impl FanoutTurnObserver {
+    /// Build an observer that forwards to every supplied target.
+    #[must_use]
+    pub fn new(observers: Vec<std::sync::Arc<dyn SessionTurnObserver>>) -> Self {
+        Self { observers }
+    }
+}
+
+impl SessionTurnObserver for FanoutTurnObserver {
+    fn turn_ended(&self, id: AgentSessionId) {
+        for observer in &self.observers {
+            observer.turn_ended(id);
+        }
+    }
+
+    fn session_stopped(&self, id: AgentSessionId) {
+        for observer in &self.observers {
+            observer.session_stopped(id);
+        }
+    }
 }
 
 impl<T: SessionTurnObserver + ?Sized> SessionTurnObserver for std::sync::Arc<T> {

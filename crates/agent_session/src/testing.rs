@@ -31,6 +31,16 @@ type Lease = (Option<ReplicaId>, i64);
 /// One replica's row: its last heartbeat and published forwarding address.
 type ReplicaRow = (std::time::Instant, Option<ReplicaAddress>);
 
+fn next_log_created_at(rows: &[StoredAgentSessionLog]) -> chrono::DateTime<chrono::Utc> {
+    let now = chrono::Utc::now();
+    rows.iter()
+        .map(|row| row.created_at)
+        .max()
+        .map_or(now, |latest| {
+            now.max(latest + chrono::Duration::microseconds(1))
+        })
+}
+
 /// An in-memory [`AgentSessionRepo`] and [`AgentSessionLogRepo`].
 ///
 /// Cheap to clone - clones share one store, so a handle kept for assertions
@@ -100,13 +110,12 @@ impl InMemoryAgentSessionRepo {
             .lock()
             .expect("in-memory log store is not poisoned");
         for entry in entries {
-            logs.entry(entry.agent_session_id)
-                .or_default()
-                .push(StoredAgentSessionLog {
-                    id: macro_uuid::generate_uuid_v7(),
-                    created_at: chrono::Utc::now(),
-                    entry,
-                });
+            let rows = logs.entry(entry.agent_session_id).or_default();
+            rows.push(StoredAgentSessionLog {
+                id: macro_uuid::generate_uuid_v7(),
+                created_at: next_log_created_at(rows),
+                entry,
+            });
         }
     }
 }
@@ -447,17 +456,20 @@ impl InMemoryAgentSessionRepo {
             _ => None,
         };
         let session_id = log.agent_session_id;
-        let stored = StoredAgentSessionLog {
-            id: macro_uuid::generate_uuid_v7(),
-            created_at: chrono::Utc::now(),
-            entry: log,
+        let stored = {
+            let mut logs = self
+                .logs
+                .lock()
+                .expect("in-memory log store is not poisoned");
+            let rows = logs.entry(session_id).or_default();
+            let stored = StoredAgentSessionLog {
+                id: macro_uuid::generate_uuid_v7(),
+                created_at: next_log_created_at(rows),
+                entry: log,
+            };
+            rows.push(stored.clone());
+            stored
         };
-        self.logs
-            .lock()
-            .expect("in-memory log store is not poisoned")
-            .entry(session_id)
-            .or_default()
-            .push(stored.clone());
         if let Some(event) = event
             && let Some(session) = self
                 .sessions

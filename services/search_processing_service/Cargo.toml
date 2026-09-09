@@ -8,6 +8,7 @@ version = "0.1.0"
 [features]
 default = ["processing", "service", "pdf"]
 processing = [
+  "dep:agent_session_events",
   "dep:call",
   "dep:channels",
   "dep:chat",
@@ -43,6 +44,9 @@ path = "src/doppler_config.rs"
 
 [dependencies]
 anyhow = { workspace = true }
+agent_fold = { path = "../../crates/agent_fold", default-features = false }
+agent_session = { path = "../../crates/agent_session" }
+agent_session_events = { path = "../../crates/agent_session_events", optional = true }
 aws-sdk-dynamodb = { workspace = true }
 aws-sdk-s3 = { workspace = true }
 aws-sdk-sqs = { workspace = true }

@@ -28,14 +28,15 @@ use crate::BackfillServiceImpl;
 use crate::api::context::{ApiContext, AuthorizationService};
 use crate::domain::jobs::{BackfillJobs, JobId};
 use crate::domain::models::{
-    CalendarEventBackfillRequest, CallBackfillRequest, ChannelBackfillRequest, ChatBackfillRequest,
-    DocumentBackfillRequest, EmailBackfillRequest, ProjectBackfillRequest,
-    PropertiesBackfillRequest,
+    AgentSessionBackfillRequest, CalendarEventBackfillRequest, CallBackfillRequest,
+    ChannelBackfillRequest, ChatBackfillRequest, DocumentBackfillRequest, EmailBackfillRequest,
+    ProjectBackfillRequest, PropertiesBackfillRequest,
 };
 use crate::domain::service::BackfillService;
 
 pub fn router() -> Router<ApiContext> {
     Router::new()
+        .route("/agent-sessions", post(agent_sessions))
         .route("/calls", post(calls))
         .route("/chats", post(chats))
         .route("/channels", post(channels))
@@ -45,6 +46,24 @@ pub fn router() -> Router<ApiContext> {
         .route("/projects", post(projects))
         .route("/calendar-events", post(calendar_events))
         .route("/{job_id}", get(status))
+}
+
+#[tracing::instrument(skip(service, jobs, _internal_authorization, req))]
+async fn agent_sessions(
+    State(service): State<Arc<BackfillServiceImpl>>,
+    State(jobs): State<BackfillJobs>,
+    _internal_authorization: MacroAuthorizationExtractor<AuthorizationService, InternalOnly>,
+    extract::Json(req): extract::Json<AgentSessionBackfillRequest>,
+) -> Response {
+    spawn_backfill(
+        service,
+        jobs,
+        "agent-sessions",
+        move |svc, progress, cancel| async move {
+            svc.backfill_agent_sessions(req, progress, cancel).await
+        },
+    )
+    .await
 }
 
 #[derive(Debug, Serialize)]

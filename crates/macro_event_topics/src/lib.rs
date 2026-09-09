@@ -65,6 +65,8 @@ topics! {
     MacroChannelsTopic => "macro.channels",
     /// Signals telling the agent harness to open or feed an agent session.
     MacroAgentSessionsTopic => "macro.agent_sessions",
+    /// Agent-session search projection invalidations, keyed by session id.
+    MacroAgentSessionSearchTopic => "macro.agent_session_search",
     /// Email lifecycle events (links, messages, threads, labels).
     MacroEmailTopic => "macro.email",
     /// Webhook configuration lifecycle events (created / updated / deleted / validated).

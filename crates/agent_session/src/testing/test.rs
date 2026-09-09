@@ -3,6 +3,28 @@ use crate::domain::model::Message;
 use agent_runtime_protocol::domain::schema::v0::SystemEvent;
 
 #[tokio::test]
+async fn seeded_history_preserves_append_order_with_strict_timestamps() {
+    let session = AgentSessionId::new();
+    let entries = (0..32).map(|_| AgentSessionLog {
+        agent_session_id: session,
+        user_id: None,
+        content: Message::ToServer(ToServerMessage::Event {
+            event: SystemEvent::AcpReady,
+        }),
+    });
+    let repo = InMemoryAgentSessionRepo::from_iter(entries);
+
+    let rows = AgentSessionLogRepo::list_by_session(&repo, session)
+        .await
+        .unwrap();
+
+    assert!(
+        rows.windows(2)
+            .all(|pair| pair[0].created_at < pair[1].created_at)
+    );
+}
+
+#[tokio::test]
 async fn effective_history_orders_timestamps_and_uuid_ties_before_selecting_boundary() {
     let repo = InMemoryAgentSessionRepo::new();
     let session = AgentSessionId::new();

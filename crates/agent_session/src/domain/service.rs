@@ -29,6 +29,7 @@ use std::sync::Arc;
 
 use agent_client_protocol::schema::v1::SessionId;
 use agent_fold::domain::fold::FoldMachineImpl;
+use agent_fold::domain::model::FoldEvent;
 use agent_fold::domain::ports::{FoldMachine, FoldedMessageRepo};
 use agent_runtime_protocol::domain::action::{AgentAction, AgentActionId};
 use agent_runtime_protocol::domain::schema::v0::{SystemEvent, ToServerMessage};
@@ -54,8 +55,9 @@ use super::model::{
 };
 use super::ports::{
     AgentConnector, AgentSessionLogRepo, AgentSessionLogWriter, AgentSessionNameGenerator,
-    AgentSessionQueueChanged, AgentSessionRealtime, AgentSessionRepo,
-    NoOpAgentSessionNameGenerator, NoOpTurnObserver, SessionOwnership, SessionTurnObserver,
+    AgentSessionQueueChanged, AgentSessionRealtime, AgentSessionRepo, AgentSessionSearchEvents,
+    NoOpAgentSessionNameGenerator, NoOpAgentSessionSearchEvents, NoOpTurnObserver,
+    SessionOwnership, SessionTurnObserver,
 };
 use super::session::actors::{SessionActor, SessionCommand, Stepped};
 use super::session::{CloseReason, Input};
@@ -251,6 +253,7 @@ pub struct AgentSessionServiceImpl<R, Folds, Rt, Namer = NoOpAgentSessionNameGen
     folds: Folds,
     realtime: Rt,
     name_generator: Namer,
+    search_events: Arc<dyn AgentSessionSearchEvents>,
     /// Told when a session's turn ends or its actor stops - the harness's
     /// prompt-queue gate. Erased so wiring it is not another type parameter.
     turn_observer: Arc<dyn SessionTurnObserver>,
@@ -277,6 +280,7 @@ impl<R, Folds, Rt> AgentSessionServiceImpl<R, Folds, Rt> {
             folds,
             realtime,
             name_generator: NoOpAgentSessionNameGenerator,
+            search_events: Arc::new(NoOpAgentSessionSearchEvents),
             turn_observer: Arc::new(NoOpTurnObserver),
             active: Arc::new(DashMap::new()),
             replica: ReplicaId::mint(),
@@ -299,6 +303,7 @@ impl<R, Folds, Rt, Namer> AgentSessionServiceImpl<R, Folds, Rt, Namer> {
             folds: self.folds,
             realtime: self.realtime,
             name_generator,
+            search_events: self.search_events,
             turn_observer: self.turn_observer,
             active: self.active,
             replica: self.replica,
@@ -313,6 +318,13 @@ impl<R, Folds, Rt, Namer> AgentSessionServiceImpl<R, Folds, Rt, Namer> {
     #[must_use]
     pub fn with_turn_observer(mut self, turn_observer: Arc<dyn SessionTurnObserver>) -> Self {
         self.turn_observer = turn_observer;
+        self
+    }
+
+    /// Publish identifier-only invalidations for the rebuildable search view.
+    #[must_use]
+    pub fn with_search_events(mut self, search_events: Arc<dyn AgentSessionSearchEvents>) -> Self {
+        self.search_events = search_events;
         self
     }
 
@@ -416,7 +428,8 @@ impl<R, Folds, Rt, Namer> AgentSessionServiceImpl<R, Folds, Rt, Namer> {
         // something. Fenced under the claim taken above: if another replica
         // supersedes this one, the store rejects the next append and the
         // actor tears down through its ordinary log-failure path.
-        let logs = LiveSessionLogWriter::fenced(self.repo.clone(), self.realtime.clone(), claim);
+        let logs = LiveSessionLogWriter::fenced(self.repo.clone(), self.realtime.clone(), claim)
+            .with_search_events(Arc::clone(&self.search_events));
         let actor = SessionActor::new(
             id,
             session.acp_session_id,
@@ -553,7 +566,15 @@ where
     Namer: AgentSessionNameGenerator + Clone,
 {
     async fn create_session(&self, params: CreateAgentSessionParams) -> Result<AgentSession> {
-        AgentSessionRepo::create(&self.repo, params).await
+        let session = AgentSessionRepo::create(&self.repo, params).await?;
+        self.search_events
+            .reconcile(session.id)
+            .await
+            .inspect_err(|error| {
+                tracing::warn!(error=?error, id=%session.id, "failed to publish new agent-session search reconcile");
+            })
+            .ok();
+        Ok(session)
     }
 
     async fn rename_session(
@@ -582,6 +603,13 @@ where
                 tracing::warn!(error = ?error, %id, "failed to publish agent session rename");
             })
             .ok();
+        self.search_events
+            .reconcile(id)
+            .await
+            .inspect_err(|error| {
+                tracing::warn!(error=?error, %id, "failed to publish renamed agent-session search reconcile");
+            })
+            .ok();
         Ok(())
     }
 
@@ -603,7 +631,15 @@ where
         let result = self.repo.delete(id).await;
         self.active
             .remove_if(&id, |_, active| Arc::ptr_eq(&active.marker, &marker));
-        result
+        result?;
+        self.search_events
+            .deleted(id)
+            .await
+            .inspect_err(|error| {
+                tracing::warn!(error=?error, %id, "failed to publish agent-session search deletion");
+            })
+            .ok();
+        Ok(())
     }
 
     async fn close_session(&self, id: AgentSessionId) -> Result<()> {
@@ -638,7 +674,8 @@ where
         fields(agent.session.id = %id),
     )]
     async fn mark_disconnected(&self, id: AgentSessionId) -> Result<()> {
-        let mut logs = LiveSessionLogWriter::new(self.repo.clone(), self.realtime.clone());
+        let mut logs = LiveSessionLogWriter::new(self.repo.clone(), self.realtime.clone())
+            .with_search_events(Arc::clone(&self.search_events));
         tokio::time::timeout(
             SESSION_PERSIST_TIMEOUT,
             logs.append(AgentSessionLog {
@@ -714,6 +751,7 @@ where
             spawn_initial_agent_session_rename(
                 self.repo.clone(),
                 self.realtime.clone(),
+                Arc::clone(&self.search_events),
                 self.name_generator.clone(),
                 id,
                 initial_prompt,
@@ -789,6 +827,7 @@ where
 fn spawn_initial_agent_session_rename<R, Rt, Namer>(
     repo: R,
     realtime: Rt,
+    search_events: Arc<dyn AgentSessionSearchEvents>,
     name_generator: Namer,
     id: AgentSessionId,
     initial_prompt: String,
@@ -835,6 +874,7 @@ fn spawn_initial_agent_session_rename<R, Rt, Namer>(
                         name,
                     })
                     .await?;
+                search_events.reconcile(id).await?;
                 Ok("renamed")
             }
             .await;
@@ -902,6 +942,7 @@ fn validate_agent_session_name(raw: &str) -> Result<&str> {
 pub struct LiveSessionLogWriter<R, Rt> {
     repo: R,
     realtime: Rt,
+    search_events: Arc<dyn AgentSessionSearchEvents>,
     fold: Option<FoldMachineImpl>,
     /// The management claim this writer appends under, when it has one. A
     /// session actor always writes fenced; the unfenced constructor exists
@@ -922,6 +963,7 @@ impl<R, Rt> LiveSessionLogWriter<R, Rt> {
         Self {
             repo,
             realtime,
+            search_events: Arc::new(NoOpAgentSessionSearchEvents),
             fold: None,
             claim: None,
         }
@@ -933,9 +975,17 @@ impl<R, Rt> LiveSessionLogWriter<R, Rt> {
         Self {
             repo,
             realtime,
+            search_events: Arc::new(NoOpAgentSessionSearchEvents),
             fold: None,
             claim: Some(claim),
         }
+    }
+
+    /// Attach the publisher used for stable folded-transcript invalidations.
+    #[must_use]
+    pub fn with_search_events(mut self, search_events: Arc<dyn AgentSessionSearchEvents>) -> Self {
+        self.search_events = search_events;
+        self
     }
 }
 
@@ -978,19 +1028,33 @@ where
             None => AgentSessionLogRepo::create(&self.repo, log.clone()).await?,
         };
 
-        if let Some(fold) = &mut self.fold {
-            let _ = fold.push(log.clone());
+        let should_reconcile = if let Some(fold) = &mut self.fold {
+            fold_events_need_search_reconcile(&fold.push(log.clone()))
         } else {
-            match self.catch_up(session).await {
-                Ok(fold) => self.fold = Some(fold),
+            match self.catch_up(session, stored.id).await {
+                Ok((fold, should_reconcile)) => {
+                    self.fold = Some(fold);
+                    should_reconcile
+                }
                 Err(error) => {
                     tracing::error!(
                         error = ?error,
                         %session,
                         "failed to fold agent session frame"
                     );
+                    false
                 }
             }
+        };
+
+        if should_reconcile {
+            self.search_events
+                .reconcile(session)
+                .await
+                .inspect_err(|error| {
+                    tracing::warn!(error=?error, %session, "failed to publish stable agent-session search reconcile");
+                })
+                .ok();
         }
 
         // Projected on every frame - idempotent, rebuildable from the log,
@@ -1152,7 +1216,9 @@ where
     ///
     /// Runs once per connection, on its first frame - by which point that
     /// frame is already in the log, so replaying the log folds it too and the
-    /// caller must not push it again.
+    /// caller must not push it again. Only events produced by that newly
+    /// appended row count toward a search invalidation; historical prompts
+    /// encountered during catch-up are not changes.
     ///
     /// This is what makes re-attaching correct.
     /// [`TurnId`](agent_fold::domain::model::TurnId)s are a counter over the
@@ -1163,17 +1229,33 @@ where
     async fn catch_up(
         &self,
         session: AgentSessionId,
-    ) -> std::result::Result<FoldMachineImpl, rootcause::Report> {
+        appended_id: macro_uuid::Uuid,
+    ) -> std::result::Result<(FoldMachineImpl, bool), rootcause::Report> {
         let log = AgentSessionLogRepo::list_by_session(&self.repo, session)
             .await
             .map_err(|error| rootcause::report!(error))?;
 
         let mut fold = FoldMachineImpl::new();
+        let mut should_reconcile = false;
         for stored in log {
-            let _ = fold.push(stored.entry);
+            let is_appended_row = stored.id == appended_id;
+            let events = fold.push(stored.entry);
+            if is_appended_row {
+                should_reconcile = fold_events_need_search_reconcile(&events);
+            }
         }
-        Ok(fold)
+        Ok((fold, should_reconcile))
     }
+}
+
+fn fold_events_need_search_reconcile(events: &[FoldEvent<'_>]) -> bool {
+    events.iter().any(|event| match event {
+        FoldEvent::MessagesReplaced(_) => true,
+        FoldEvent::NewMessage(message) | FoldEvent::MessageUpdate(message) => {
+            message.author.kind() == AuthorKind::User
+        }
+        FoldEvent::MetadataUpdated(_) => false,
+    })
 }
 
 /// Step the actor until its machine stops, then release the registry entry

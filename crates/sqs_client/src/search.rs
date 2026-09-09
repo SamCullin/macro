@@ -1,6 +1,7 @@
 use crate::{
     SQS,
     search::{
+        agent_session::AgentSession,
         calendar_event::UpsertCalendarEvent,
         call::{CallRecordMessage, RemoveCallRecord},
         channel::ChannelMessageUpdate,
@@ -15,6 +16,7 @@ use aws_sdk_sqs::{self as sqs, types::SendMessageBatchRequestEntry};
 use futures::StreamExt;
 use strum::Display;
 
+pub mod agent_session;
 pub mod calendar_event;
 pub mod call;
 pub mod channel;
@@ -76,6 +78,9 @@ pub enum SearchQueueMessage {
     // Chat
     /// SQS backfill work-queue contract for reconciling a chat message.
     ChatMessage(ChatMessage),
+    // Agent session
+    /// Reconcile one session by replaying its authoritative ACP log.
+    AgentSession(AgentSession),
     // Email backfills
     ExtractEmailThreadBatch(EmailThreadBatchMessage),
     // Channel
@@ -99,6 +104,7 @@ impl PrimaryId for SearchQueueMessage {
             SearchQueueMessage::ExtractSync(message) => message.document_id.clone(),
             // The message id keeps entries unique within an SQS batch.
             SearchQueueMessage::ChatMessage(message) => message.message_id.clone(),
+            SearchQueueMessage::AgentSession(message) => message.agent_session_id.clone(),
             SearchQueueMessage::ExtractEmailThreadBatch(message) => {
                 message.thread_ids.first().cloned().unwrap_or_default()
             }
@@ -125,6 +131,7 @@ impl SearchQueueMessage {
             SearchQueueMessage::ExtractSync(_) => Operation::ExtractSync,
             // Chat
             SearchQueueMessage::ChatMessage(_) => Operation::ExtractText,
+            SearchQueueMessage::AgentSession(_) => Operation::ExtractText,
             // Email backfills
             SearchQueueMessage::ExtractEmailThreadBatch(_) => Operation::ExtractText,
             // Channels

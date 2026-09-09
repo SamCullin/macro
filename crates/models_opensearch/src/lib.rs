@@ -25,6 +25,8 @@ pub enum SearchIndex {
     Projects,
     /// The calendar events alias
     CalendarEvents,
+    /// The agent sessions alias
+    AgentSessions,
 }
 
 /// All searchable entity types — the tag on a unified `SearchHit`,

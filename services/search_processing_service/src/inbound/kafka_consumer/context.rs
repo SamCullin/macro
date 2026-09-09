@@ -5,11 +5,14 @@ use opensearch_client::OpensearchClient;
 use s3_client::S3;
 use sqlx::PgPool;
 
+use crate::outbound::agent_session_search::AgentSessionIndexer;
+
 /// Shared dependencies used to process search-index events from Kafka.
 #[derive(Clone)]
 pub(crate) struct KafkaProcessingContext {
     pub(crate) db: PgPool,
     pub(crate) opensearch_client: Arc<OpensearchClient>,
+    pub(crate) agent_session_indexer: Arc<AgentSessionIndexer>,
     pub(crate) s3_client: Arc<S3>,
     pub(crate) document_storage_bucket: String,
     pub(crate) lexical_client: Arc<LexicalClient>,

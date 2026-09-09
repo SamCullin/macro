@@ -2,6 +2,9 @@
 
 pub mod postgres;
 
+/// Kafka-backed identifier-only search invalidations.
+pub mod search_events;
+
 /// Haiku-backed automatic session naming.
 pub mod name_generator;
 

@@ -114,6 +114,28 @@ pub struct CallBackfillCursor {
     pub call_id: uuid::Uuid,
 }
 
+/// Agent-session backfill filter. Empty `agent_session_ids` scans every
+/// persisted session; a non-empty list performs a targeted repair.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct AgentSessionBackfillRequest {
+    /// Reconcile exactly these sessions instead of scanning the table.
+    pub agent_session_ids: Vec<uuid::Uuid>,
+    /// Only scan sessions modified at or after this instant.
+    pub modified_after: Option<DateTime<Utc>>,
+    /// Only scan sessions modified before this instant.
+    pub modified_before: Option<DateTime<Utc>>,
+    /// Override the OpenSearch target index for a blue/green rebuild.
+    pub index_override: Option<String>,
+}
+
+/// Keyset cursor for the `(modified_at, id)` agent-session scan.
+#[derive(Debug, Clone)]
+pub struct AgentSessionBackfillCursor {
+    pub modified_at: DateTime<Utc>,
+    pub agent_session_id: uuid::Uuid,
+}
+
 /// Chat-message backfill filter. Empty vectors mean "all messages for every
 /// chat / every user".
 ///

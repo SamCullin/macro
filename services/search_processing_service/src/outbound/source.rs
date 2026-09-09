@@ -5,14 +5,15 @@ use model::document::FileType;
 use models_properties::EntityType;
 use sqlx::PgPool;
 use sqs_client::search::{
-    SearchQueueMessage, calendar_event::UpsertCalendarEvent, call::CallRecordMessage,
-    channel::ChannelMessageUpdate, chat::ChatMessage, email::EmailThreadBatchMessage,
-    project::UpsertProject,
+    SearchQueueMessage, agent_session::AgentSession as AgentSessionMessage,
+    calendar_event::UpsertCalendarEvent, call::CallRecordMessage, channel::ChannelMessageUpdate,
+    chat::ChatMessage, email::EmailThreadBatchMessage, project::UpsertProject,
 };
 
 use crate::config::BackfillPageSizes;
 use crate::domain::models::{
-    BackfillError, CalendarEventBackfillCursor, CalendarEventBackfillRequest, CallBackfillCursor,
+    AgentSessionBackfillCursor, AgentSessionBackfillRequest, BackfillError,
+    CalendarEventBackfillCursor, CalendarEventBackfillRequest, CallBackfillCursor,
     CallBackfillRequest, ChannelBackfillRequest, ChatBackfillCursor, ChatBackfillRequest,
     DocumentBackfillCursor, DocumentBackfillRequest, EmailBackfillRequest, ProjectBackfillCursor,
     ProjectBackfillRequest, PropertiesBackfillRequest, PropertySourcePage, SourcePage,
@@ -20,6 +21,7 @@ use crate::domain::models::{
 use crate::domain::ports::BackfillSource;
 
 const DEFAULT_EMAIL_BATCH_SIZE: usize = 50;
+const AGENT_SESSIONS_PAGE_SIZE: usize = 1000;
 
 /// Page size for the properties backfill's distinct-entity-id scan. A fixed
 /// value rather than a config knob: property rows are few and each entity is
@@ -41,6 +43,101 @@ impl PgBackfillSource {
 }
 
 impl BackfillSource for PgBackfillSource {
+    async fn fetch_agent_sessions(
+        &self,
+        req: &AgentSessionBackfillRequest,
+        cursor: Option<AgentSessionBackfillCursor>,
+    ) -> Result<(SourcePage, Option<AgentSessionBackfillCursor>), BackfillError> {
+        if !req.agent_session_ids.is_empty() {
+            let resume_from = cursor
+                .as_ref()
+                .and_then(|cursor| {
+                    req.agent_session_ids
+                        .iter()
+                        .position(|id| *id == cursor.agent_session_id)
+                })
+                .map(|position| position + 1)
+                .unwrap_or(0);
+            let page = page_of(
+                &req.agent_session_ids,
+                resume_from,
+                AGENT_SESSIONS_PAGE_SIZE,
+            );
+            if page.is_empty() {
+                return Ok((SourcePage::empty(), None));
+            }
+            let messages = page
+                .iter()
+                .map(|id| {
+                    SearchQueueMessage::AgentSession(AgentSessionMessage {
+                        agent_session_id: id.to_string(),
+                        index_override: req.index_override.clone(),
+                    })
+                })
+                .collect();
+            let next_cursor = page.last().map(|id| AgentSessionBackfillCursor {
+                // Only the id is consulted in the explicit-list branch.
+                modified_at: chrono::DateTime::UNIX_EPOCH,
+                agent_session_id: *id,
+            });
+            return Ok((
+                SourcePage {
+                    messages,
+                    rows_consumed: page.len(),
+                },
+                next_cursor,
+            ));
+        }
+
+        let cursor_modified_at = cursor.as_ref().map(|cursor| cursor.modified_at);
+        let cursor_id = cursor.map(|cursor| cursor.agent_session_id);
+        let batch = sqlx::query!(
+            r#"
+            SELECT id, modified_at
+            FROM agent_session
+            WHERE ($1::timestamptz IS NULL OR modified_at >= $1)
+              AND ($2::timestamptz IS NULL OR modified_at < $2)
+              AND (
+                $3::timestamptz IS NULL
+                OR $4::uuid IS NULL
+                OR (modified_at, id) > ($3, $4)
+              )
+            ORDER BY modified_at ASC, id ASC
+            LIMIT $5
+            "#,
+            req.modified_after,
+            req.modified_before,
+            cursor_modified_at,
+            cursor_id,
+            AGENT_SESSIONS_PAGE_SIZE as i64,
+        )
+        .fetch_all(&self.db)
+        .await
+        .map_err(|error| BackfillError::Source(error.into()))?;
+
+        let next_cursor = batch.last().map(|row| AgentSessionBackfillCursor {
+            modified_at: row.modified_at,
+            agent_session_id: row.id,
+        });
+        let rows_consumed = batch.len();
+        let messages = batch
+            .into_iter()
+            .map(|row| {
+                SearchQueueMessage::AgentSession(AgentSessionMessage {
+                    agent_session_id: row.id.to_string(),
+                    index_override: req.index_override.clone(),
+                })
+            })
+            .collect();
+        Ok((
+            SourcePage {
+                messages,
+                rows_consumed,
+            },
+            next_cursor,
+        ))
+    }
+
     async fn fetch_calls(
         &self,
         req: &CallBackfillRequest,

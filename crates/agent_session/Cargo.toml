@@ -18,6 +18,7 @@ dashmap = { workspace = true }
 macro_uuid = { path = "../macro_uuid" }
 mockall = { workspace = true, optional = true }
 agent_fold = { path = "../agent_fold" }
+agent_session_events = { path = "../agent_session_events" }
 agent_runtime_protocol = { path = "../agent_runtime_protocol", features = ["utoipa"] }
 axum = { workspace = true }
 bots = { path = "../bots"}
@@ -32,6 +33,7 @@ clap = { workspace = true }
 macro_authorization = { path = "../macro_authorization", default-features = false, features = [
   "axum",
 ] }
+macro_event_broker = { path = "../macro_event_broker", default-features = false }
 macro_service_urls = { path = "../macro_service_urls" }
 macro_user_id =  { path = "../macro_user_id", features = ["sqlx"] }
 utoipa = { workspace = true }

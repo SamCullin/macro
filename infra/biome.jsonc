@@ -17,6 +17,7 @@
       "**/*.jsx",
       "**/openapi.json",
       // FusionAuth consumes these as external script templates; keep their source formatting stable.
+      "!fusion-auth/**/populate_jwt.js",
       "!stacks/fusionauth-instance/**/populate_jwt.js"
     ]
   },

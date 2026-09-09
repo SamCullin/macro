@@ -2,9 +2,9 @@
 
 This service owns the search-event pipeline:
 
-- **Live calls**: the `search-processing-service` Kafka consumer reads call lifecycle events from `macro.calls` and indexes them into OpenSearch.
-- **Other live entities**: SQS workers drain `SEARCH_EVENT_QUEUE` for all other search entities.
-- **Backfills**: internal HTTP endpoints enqueue every indexable record of a given entity type onto SQS. Call backfills remain on SQS alongside all other entity backfills.
+- **Live updates**: the `search-processing-service` Kafka consumer reads the declared entity lifecycle topics and reconciles their OpenSearch documents.
+- **Queued work**: SQS workers drain `SEARCH_EVENT_QUEUE` for backfills and legacy producers.
+- **Backfills**: internal HTTP endpoints enqueue every indexable record of a given entity type onto SQS.
 
 ## Architecture
 
@@ -12,10 +12,10 @@ sps is hexagonal:
 
 ```
 src/
-  domain/                     # models, ports, BackfillService trait + orchestrator
-  outbound/                   # Postgres backfill source and SQS publisher adapters
+  domain/                     # indexing/backfill models, ports, and application services
+  outbound/                   # Postgres sources, OpenSearch sinks, SQS/Kafka adapters
   api/internal/               # axum handlers — thin pass-throughs to the orchestrator
-  inbound/kafka_consumer.rs   # live call event decoding, handoff, commits, and retries
+  inbound/kafka_consumer.rs   # live event decoding, sharded handoff, commits, and retries
   process/                    # indexing shared by the SQS and Kafka inbound adapters
 ```
 
@@ -23,7 +23,11 @@ The orchestrator is the single inbound contract for HTTP handlers. Swapping an a
 
 ## Ingestion Ownership and Event Mapping
 
-Kafka is used only for live call indexing. SQS remains responsible for live events from other search entities and for every backfill, including call backfills. The SQS call message contract and handler remain available so `POST /internal/backfill/calls` can enqueue call records with the existing backfill path.
+Agent-session live events carry only a session UUID on `macro.agent_session_search`. The processor rereads the persisted `agent_session` row and effective `agent_session_log`, applies `agent_fold`, and replaces the parent plus folded-message children in `agent_sessions`. Raw ACP frames are never copied to OpenSearch. SQS uses the same authoritative reconciliation for `POST /internal/backfill/agent-sessions`.
+
+Agent-session invalidations are emitted on creation, rename, deletion, user prompts, history replacement, turn completion, and actor stop. Agent token chunks do not trigger per-chunk indexing; the completed turn is the stable searchable boundary.
+
+Call backfills also remain on SQS, so `POST /internal/backfill/calls` can enqueue call records through the existing path.
 
 The `macro.calls` lifecycle events map to search actions as follows:
 
@@ -40,12 +44,12 @@ Upserts read the current call state from Postgres and overwrite the indexed repr
 
 ### Kafka Delivery Contract
 
-- The durable consumer group is `search-processing-service`. It subscribes only to `macro.calls`.
-- The poll loop hands decoded events to a bounded 128-message channel. Sending waits when the channel is full, which stops polling and committing until the worker catches up.
-- Exactly one worker drains the channel sequentially. This preserves partition/key ordering so an upsert cannot be processed after a later delete for the same call. Do not add naive concurrent workers; any future parallelism must consistently shard by `call_id`.
-- An offset is committed asynchronously immediately after a successful in-memory handoff, not after OpenSearch processing. This commit-after-handoff design creates a loss window: a process or host crash can lose already committed events still in the 128-message buffer. If the worker channel closes before handoff, the offset is left uncommitted for redelivery.
+- The durable consumer group is `search-processing-service`. Its topic list comes from `DeclaredMacroEvent` in `src/inbound/kafka_consumer.rs`.
+- The poll loop shards events by entity key across ten bounded sequential workers. Each worker has sixteen waiting slots, so at most 160 handed-off events are buffered.
+- Events for the same entity always use one worker. This preserves ordering for a session reconcile followed by its delete while unrelated entities process concurrently.
+- An offset is committed asynchronously immediately after a successful in-memory handoff, not after OpenSearch processing. This commit-after-handoff design creates a loss window: a process or host crash can lose already committed buffered events. If the worker channel closes before handoff, the offset is left uncommitted for redelivery.
 - Malformed, keyless, and unsupported-schema records are logged and committed without handoff so a poison record cannot wedge a partition. Commit failures are logged and may cause duplicate delivery, which is safe because full upserts and per-call deletes are idempotent.
-- Processing gets five total attempts. Failures are retried after 1, 2, 4, and 8 seconds; after the fifth failure, the event is logged with its call ID, event type, partition, offset, and final error, then dropped so later events can continue.
+- Processing gets three total attempts. After the third failure, the event is logged with its entity ID, event type, partition, offset, and final error, then dropped so later events can continue. The backfill endpoint repairs gaps.
 
 ## Running Locally
 
@@ -98,6 +102,18 @@ cargo run --features disable_processing
 
 ## Rollout, Monitoring, and Recovery
 
+### Agent sessions
+
+1. Run the OpenSearch index creation helper so `agent_sessions_v1` and the stable `agent_sessions` alias exist.
+2. Deploy search-processing with the `macro.agent_session_search` consumer before deploying the harness publisher.
+3. Deploy agent-harness. New sessions and stable transcript changes now publish identifier-only invalidations.
+4. Start `POST /internal/backfill/agent-sessions` with `{}` and poll the returned job ID. For a blue/green rebuild, pass `{"index_override":"agent_sessions_v2"}` after creating that physical index.
+5. Compare the OpenSearch parent count with `agent_session`, monitor Kafka lag and dropped-event logs, and use `{"agent_session_ids":["<uuid>"]}` for targeted repair.
+
+This pass intentionally does not add agent sessions to unified search responses or frontend rendering. When that read path is added, it must filter parent hits through the caller's agent-session access before returning either parent metadata or child highlights; `owner_id` is stored for that purpose but is not itself authorization.
+
+### Calls
+
 1. Configure `KAFKA_BROKERS` and the required MSK read permissions, then deploy the Kafka consumer while the live SQS call producer is still enabled.
 2. On the first deployment, the new `search-processing-service` group has no committed offsets, so `auto.offset.reset=earliest` replays the retained `macro.calls` history. This replay and the temporary dual delivery from Kafka and SQS are safe: call upserts are full idempotent overwrites, and deletes are idempotent delete-by-query operations.
 3. Before disabling live SQS call publication, confirm the consumer-group lag on `macro.calls` has caught up, worker errors are healthy, and the `call_records` index is fresh. Continue monitoring lag after cutover.
@@ -119,10 +135,11 @@ Use `POST /internal/backfill/calls` after a rollback, a dropped upsert, or a sus
 
 ## Backfill HTTP Routes
 
-Every search-indexed entity has a POST endpoint on sps's internal surface. They all share the same response shape (`{"enqueued": <usize>}`), share internal-auth via the `x-internal-auth-key` header, and accept a per-entity JSON filter in the request body.
+Every search-indexed entity has a POST endpoint on sps's internal surface. A POST returns `202 Accepted` with `{"job_id":"..."}`; poll `GET /internal/backfill/{job_id}` for progress and completion. Routes share internal-auth via the `x-internal-auth-key` header and accept a per-entity JSON filter in the request body.
 
 | Entity | Route | Body (all fields optional) |
 |---|---|---|
+| Agent sessions | `POST /internal/backfill/agent-sessions` | `{"agent_session_ids": ["<uuid>"], "modified_after": "...", "modified_before": "...", "index_override": "agent_sessions_v2"}` — empty IDs = all sessions |
 | Calls | `POST /internal/backfill/calls` | `{"call_ids": ["<uuid>"]}` — empty = all archived calls |
 | Chats | `POST /internal/backfill/chats` | `{"chat_ids": [...], "user_ids": [...]}` |
 | Channels | `POST /internal/backfill/channels` | `{}` |

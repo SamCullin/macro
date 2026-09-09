@@ -15,9 +15,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::jobs::JobProgress;
 use super::models::{
-    BackfillError, BackfillReceipt, CalendarEventBackfillRequest, CallBackfillRequest,
-    ChannelBackfillRequest, ChatBackfillRequest, DocumentBackfillRequest, EmailBackfillRequest,
-    ProjectBackfillRequest, PropertiesBackfillRequest, PropertySourcePage, SourcePage,
+    AgentSessionBackfillRequest, BackfillError, BackfillReceipt, CalendarEventBackfillRequest,
+    CallBackfillRequest, ChannelBackfillRequest, ChatBackfillRequest, DocumentBackfillRequest,
+    EmailBackfillRequest, ProjectBackfillRequest, PropertiesBackfillRequest, PropertySourcePage,
+    SourcePage,
 };
 use super::ports::{BackfillSource, PropertyBackfillIndexer, SearchEventPublisher};
 
@@ -69,6 +70,13 @@ where
 /// layer is responsible for spawning these onto a background task and
 /// reporting progress through `progress`.
 pub trait BackfillService: Send + Sync + 'static {
+    fn backfill_agent_sessions(
+        &self,
+        req: AgentSessionBackfillRequest,
+        progress: Arc<JobProgress>,
+        cancel: CancellationToken,
+    ) -> impl Future<Output = Result<BackfillReceipt, BackfillError>> + Send;
+
     fn backfill_calls(
         &self,
         req: CallBackfillRequest,
@@ -233,6 +241,18 @@ where
     P: SearchEventPublisher,
     I: PropertyBackfillIndexer,
 {
+    async fn backfill_agent_sessions(
+        &self,
+        req: AgentSessionBackfillRequest,
+        progress: Arc<JobProgress>,
+        cancel: CancellationToken,
+    ) -> Result<BackfillReceipt, BackfillError> {
+        drain_source_with_cursor(&self.publisher, &progress, &cancel, |cursor| {
+            self.source.fetch_agent_sessions(&req, cursor)
+        })
+        .await
+    }
+
     async fn backfill_calls(
         &self,
         req: CallBackfillRequest,

@@ -70,6 +70,7 @@ use agent_session::inbound::axum_router::{
 use agent_session::outbound::connection_gateway_realtime::ConnectionGatewayAgentSessionRealtime;
 use agent_session::outbound::name_generator::HaikuAgentSessionNameGenerator;
 use agent_session::outbound::postgres::PgAgentSessionRepo;
+use agent_session::outbound::search_events::BrokerAgentSessionSearchEvents;
 use agent_trigger::domain::broker_events::AgentSessionMacroEvent;
 use anyhow::Context as _;
 use bot_id::BotId;
@@ -220,6 +221,13 @@ async fn run() -> anyhow::Result<()> {
     // service instances below live here, so they share it.
     let replica = ReplicaId::mint();
     tracing::info!(%replica, "harness replica identity");
+    let session_search_events = Arc::new(BrokerAgentSessionSearchEvents::new(
+        MacroEventBrokerService::new(
+            KafkaEventPublisher::new(config.kafka_brokers.as_ref())
+                .context("failed to create agent-session search event publisher")?,
+            macro_event_broker::GlobalSpawner,
+        ),
+    ));
     // Bound to the harness once it exists (it is built *from* this service);
     // both attach-capable service instances report turns to the same one.
     let turn_observer = Arc::new(agent_session::domain::ports::LateBoundTurnObserver::new());
@@ -233,6 +241,7 @@ async fn run() -> anyhow::Result<()> {
     )
     .with_replica(replica)
     .with_turn_observer(turn_observer.clone())
+    .with_search_events(session_search_events.clone())
     .with_name_generator(HaikuAgentSessionNameGenerator::new(ai_usage::pg_recorder(
         pool.clone(),
     )));
@@ -378,7 +387,8 @@ async fn run() -> anyhow::Result<()> {
         NoOpRealtime,
     )
     .with_replica(replica)
-    .with_turn_observer(turn_observer.clone());
+    .with_turn_observer(turn_observer.clone())
+    .with_search_events(session_search_events.clone());
     let sandbox_and_inmem = RoutedContainers::new(sandbox, inmem, inmem_sessions);
 
     // Cursor sessions run on their owner's own Cursor account, so there is no
@@ -539,9 +549,14 @@ async fn run() -> anyhow::Result<()> {
         RedisCommandForwarder::new(redis.clone()),
         defaults,
     ));
-    // Close the loop: turn ends observed by the session actors drain the
-    // harness's prompt queue.
-    turn_observer.bind(harness.clone());
+    // Close the loop: stable turn boundaries both drain the harness prompt
+    // queue and invalidate the rebuildable search projection.
+    let harness_turns: Arc<dyn agent_session::domain::ports::SessionTurnObserver> = harness.clone();
+    let search_turns: Arc<dyn agent_session::domain::ports::SessionTurnObserver> =
+        session_search_events.clone();
+    turn_observer.bind(Arc::new(
+        agent_session::domain::ports::FanoutTurnObserver::new(vec![harness_turns, search_turns]),
+    ));
     let model_probe_timeout = std::time::Duration::from_secs(10);
     let macrod_models =
         MacrodModels::new(Arc::clone(&runtimes), redis.clone(), model_probe_timeout);
@@ -619,7 +634,8 @@ async fn run() -> anyhow::Result<()> {
             session_repo.clone(),
             FoldedMessageService::new(session_repo.clone()),
             ConnectionGatewayAgentSessionRealtime::new(connection_gateway, session_repo.clone()),
-        ),
+        )
+        .with_search_events(session_search_events),
         entity_access.clone(),
         MacroAuthorizationState::new(Arc::new(authorization_service.clone())),
     );

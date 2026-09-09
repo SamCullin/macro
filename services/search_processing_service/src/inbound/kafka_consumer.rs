@@ -10,12 +10,13 @@
 //! because their offsets are already committed.
 //!
 //! Per-entity event mapping and processing live in the [`calendar_event`],
-//! [`call`], [`channel`], [`chat`], [`document`], [`email`], [`project`], and
-//! [`property`] submodules; this module owns the poll loop, worker, retry
-//! policy, and commit semantics.
+//! [`call`], [`channel`], [`chat`], [`document`], [`email`], [`project`],
+//! [`property`], and [`agent_session`] submodules; this module owns the poll
+//! loop, worker, retry policy, and commit semantics.
 
 #![allow(clippy::enum_variant_names)]
 
+mod agent_session;
 mod calendar_event;
 mod call;
 mod channel;
@@ -39,6 +40,7 @@ use std::{
 use ::call::domain::events::CallMacroEvent;
 use ::chat::domain::events::ChatMacroEvent;
 use ::email::domain::events::EmailMacroEvent;
+use agent_session_events::AgentSessionSearchMacroEvent;
 use calendar_events::domain::events::CalendarMacroEvent;
 use channels::domain::broker_events::ChannelMacroEvent;
 use documents::domain::events::DocumentMacroEvent;
@@ -57,6 +59,7 @@ use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_retry::{Retry, strategy::ExponentialBackoff};
 
 use self::{
+    agent_session::process_agent_session_event,
     calendar_event::process_calendar_event,
     call::process_call_event,
     channel::process_channel_event,
@@ -83,6 +86,7 @@ type SearchProcessingKafkaConsumer =
 
 macro_event_broker::declare_topics!(
     DeclaredMacroEvent:
+        AgentSessionSearchMacroEvent,
         CalendarMacroEvent,
         CallMacroEvent,
         ChannelMacroEvent,
@@ -180,6 +184,7 @@ where
 /// pool.
 fn ordering_key(event: &DeclaredMacroEvent) -> Cow<'_, str> {
     match event {
+        DeclaredMacroEvent::AgentSessionSearchMacroEvent(event) => Cow::Borrowed(event.key()),
         DeclaredMacroEvent::CalendarMacroEvent(event) => Cow::Borrowed(event.key()),
         DeclaredMacroEvent::CallMacroEvent(event) => Cow::Borrowed(event.key()),
         DeclaredMacroEvent::ChannelMacroEvent(event) => Cow::Borrowed(event.key()),
@@ -268,6 +273,9 @@ async fn process_event(
     let opensearch_client = context.opensearch_client.as_ref();
 
     match event {
+        DeclaredMacroEvent::AgentSessionSearchMacroEvent(event) => {
+            process_agent_session_event(context, event, partition, offset).await
+        }
         DeclaredMacroEvent::CallMacroEvent(event) => {
             process_call_event(db, opensearch_client, event, partition, offset).await
         }

@@ -21,6 +21,7 @@ use ::email::domain::events::{
     ThreadStarredMetadata, ThreadTrashedMetadata, ThreadsReindexReason,
     ThreadsReindexRequestedMetadata,
 };
+use agent_session_events::{AgentSessionSearchMacroEvent, AgentSessionSearchTopicEvent};
 use calendar_events::domain::events::{
     CalendarEventMetadata, CalendarMacroEvent, CalendarTopicEvent,
 };
@@ -43,8 +44,9 @@ use documents::domain::events::{
 };
 use macro_event_broker::{Event, EventBrokerError, MacroEvent as _, MessageParts};
 use macro_event_topics::{
-    MacroCalendarTopic, MacroCallsTopic, MacroChannelsTopic, MacroChatsTopic, MacroDocumentsTopic,
-    MacroEmailTopic, MacroProjectsTopic, MacroPropertiesTopic, Topic as _,
+    MacroAgentSessionSearchTopic, MacroCalendarTopic, MacroCallsTopic, MacroChannelsTopic,
+    MacroChatsTopic, MacroDocumentsTopic, MacroEmailTopic, MacroProjectsTopic,
+    MacroPropertiesTopic, Topic as _,
 };
 use macro_user_id::user_id::MacroUserIdStr;
 use model::document::FileType;
@@ -1270,6 +1272,7 @@ fn subscribes_to_declared_search_processing_topics_with_durable_group() {
         "search-processing-service"
     );
     let topics = DeclaredMacroEvent::topics();
+    assert!(topics.contains(&MacroAgentSessionSearchTopic::TOPIC_STR));
     assert_eq!(MacroChatsTopic::TOPIC_STR, "macro.chats");
     assert!(topics.contains(&MacroCallsTopic::TOPIC_STR));
     assert!(topics.contains(&MacroChannelsTopic::TOPIC_STR));
@@ -1279,6 +1282,28 @@ fn subscribes_to_declared_search_processing_topics_with_durable_group() {
     assert!(topics.contains(&MacroProjectsTopic::TOPIC_STR));
     assert!(topics.contains(&MacroPropertiesTopic::TOPIC_STR));
     assert!(topics.contains(&MacroCalendarTopic::TOPIC_STR));
+}
+
+#[test]
+fn agent_session_invalidation_decodes_with_the_session_ordering_key() {
+    let id = Uuid::from_u128(10);
+    let event = AgentSessionSearchMacroEvent::reconcile(id);
+    let message = encoded_message(
+        MacroAgentSessionSearchTopic::TOPIC_STR,
+        event.key(),
+        event.event().clone(),
+    );
+
+    let decoded = DeclaredMacroEvent::decode(&message).expect("decodable agent-session event");
+    assert_eq!(ordering_key(&decoded), id.to_string());
+    let DeclaredMacroEvent::AgentSessionSearchMacroEvent(decoded) = decoded else {
+        panic!("expected agent-session event");
+    };
+    assert!(matches!(
+        decoded.event().event,
+        AgentSessionSearchTopicEvent::Reconcile(metadata)
+            if metadata.agent_session_id == id
+    ));
 }
 
 #[test]
@@ -1565,7 +1590,7 @@ fn calendar_envelope_decodes_round_trip_keyed_by_event_id() {
     });
     let message = encoded_message(
         MacroCalendarTopic::TOPIC_STR,
-        &event_id.to_string(),
+        event_id.to_string(),
         Event::new(event.clone()),
     );
 

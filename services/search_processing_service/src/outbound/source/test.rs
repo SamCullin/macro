@@ -96,3 +96,54 @@ fn carries_the_index_override() {
         other => panic!("unexpected message: {other:?}"),
     }
 }
+
+#[tokio::test]
+async fn targeted_agent_session_backfill_resumes_by_explicit_id() {
+    let ids = vec![uuid(1), uuid(2), uuid(3)];
+    let db = sqlx::postgres::PgPoolOptions::new()
+        .connect_lazy("postgres://unused:unused@localhost/unused")
+        .expect("valid lazy test pool");
+    let source = PgBackfillSource::new(
+        db,
+        BackfillPageSizes {
+            calls: 1,
+            chats: 1,
+            channels: 1,
+            documents: 1,
+            emails: 1,
+            projects: 1,
+            calendar_events: 1,
+        },
+    );
+    let req = AgentSessionBackfillRequest {
+        agent_session_ids: ids.clone(),
+        index_override: Some("agent_sessions_v2".to_owned()),
+        ..AgentSessionBackfillRequest::default()
+    };
+
+    let (page, cursor) = source
+        .fetch_agent_sessions(
+            &req,
+            Some(AgentSessionBackfillCursor {
+                modified_at: chrono::DateTime::UNIX_EPOCH,
+                agent_session_id: ids[0],
+            }),
+        )
+        .await
+        .expect("targeted page");
+
+    assert_eq!(page.rows_consumed, 2);
+    assert_eq!(cursor.expect("next cursor").agent_session_id, ids[2]);
+    let indexed_ids: Vec<_> = page
+        .messages
+        .iter()
+        .map(|message| match message {
+            SearchQueueMessage::AgentSession(message) => {
+                assert_eq!(message.index_override.as_deref(), Some("agent_sessions_v2"));
+                message.agent_session_id.clone()
+            }
+            other => panic!("unexpected message: {other:?}"),
+        })
+        .collect();
+    assert_eq!(indexed_ids, vec![ids[1].to_string(), ids[2].to_string()]);
+}

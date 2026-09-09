@@ -1,3 +1,4 @@
+pub(crate) mod agent_session;
 pub(crate) mod calendar_event;
 pub(crate) mod call;
 pub(crate) mod channel;
@@ -36,6 +37,14 @@ pub async fn process_message(
     );
 
     match search_extractor_message {
+        SearchQueueMessage::AgentSession(message) => {
+            agent_session::reconcile_agent_session(
+                &ctx.agent_session_indexer,
+                &message.agent_session_id,
+                message.index_override.as_deref(),
+            )
+            .await?;
+        }
         SearchQueueMessage::RemoveUserProfile(user_profile_id) => {
             tracing::trace!(user_profile_id = user_profile_id, "removing user profile");
             user::remove_user_profile(&ctx.opensearch_client, &user_profile_id).await?;

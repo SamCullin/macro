@@ -6,9 +6,14 @@ use crate::inbound::kafka_consumer::{KafkaProcessingContext, run_event_consumer}
 use crate::{
     api::context::{ApiContext, AuthorizationService},
     config::DatabaseUrlReadonly,
-    domain::{jobs::BackfillJobs, service::BackfillOrchestrator},
+    domain::{
+        agent_session_index::AgentSessionIndexService, jobs::BackfillJobs,
+        service::BackfillOrchestrator,
+    },
     outbound::{
-        property_search_indexer::DirectPropertyBackfillIndexer, publisher::SqsSearchEventPublisher,
+        agent_session_search::{OpenSearchAgentSessionIndex, PgAgentSessionSearchSource},
+        property_search_indexer::DirectPropertyBackfillIndexer,
+        publisher::SqsSearchEventPublisher,
         source::PgBackfillSource,
     },
     process::{context::SearchProcessingContext, worker::run_search_processing_workers},
@@ -251,12 +256,17 @@ async fn main() -> anyhow::Result<()> {
             config.queue_max_messages,
             config.queue_wait_time_seconds,
         );
+        let agent_session_indexer = Arc::new(AgentSessionIndexService::new(
+            PgAgentSessionSearchSource::new(db.clone()),
+            OpenSearchAgentSessionIndex::new(opensearch_client.clone()),
+        ));
         let search_processing_context = SearchProcessingContext {
             db: db.clone(),
             worker: Arc::new(worker.clone()),
             document_storage_bucket: config.document_storage_bucket.to_string(),
             s3_client: s3_client.clone(),
             opensearch_client: opensearch_client.clone(),
+            agent_session_indexer: agent_session_indexer.clone(),
             lexical_client: lexical_client.clone(),
             calendar_search_enabled: config.calendar_search_enabled,
         };
@@ -265,6 +275,7 @@ async fn main() -> anyhow::Result<()> {
         let kafka_processing_context = KafkaProcessingContext {
             db: db.clone(),
             opensearch_client: opensearch_client.clone(),
+            agent_session_indexer,
             s3_client: s3_client.clone(),
             document_storage_bucket: config.document_storage_bucket.to_string(),
             lexical_client,

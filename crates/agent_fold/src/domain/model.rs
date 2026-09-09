@@ -30,6 +30,8 @@ mod part;
 mod permission;
 /// The agent's plan.
 mod plan;
+/// Searchable projection of renderable messages.
+mod search;
 /// Delegated agents.
 mod subagent;
 /// Tool calls.
