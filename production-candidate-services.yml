@@ -103,6 +103,7 @@ services:
       LOCAL_AWS_URL: http://localstack:4566
       ANTHROPIC_API_KEY: ${LITELLM_API_KEY:-}
       ANTHROPIC_BASE_URL: https://llm.thatandthat.org
+      OPENAI_BASE_URL: https://llm.thatandthat.org/v1/chat/completions
 
   document_storage_service:
     environment:
