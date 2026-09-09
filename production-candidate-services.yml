@@ -111,6 +111,8 @@ services:
       LOCAL_AWS_URL: http://localstack:4566
       ANTHROPIC_API_KEY: ${LITELLM_API_KEY:-}
       ANTHROPIC_BASE_URL: https://llm.thatandthat.org
+      OPENAI_API_KEY: ${LITELLM_API_KEY:-}
+      OPENAI_BASE_URL: ${LITELLM_BASE_URL}
 
   email_service:
     environment:
