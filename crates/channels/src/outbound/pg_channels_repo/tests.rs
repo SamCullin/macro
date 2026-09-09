@@ -28,10 +28,7 @@ const NO_FILTERS: ChannelMessageFilters = ChannelMessageFilters {
     created_before: None,
     activity_after: None,
     activity_before: None,
-    notification_filters: NotificationFilters {
-        done: None,
-        seen: None,
-    },
+    notification_filters: NotificationFilters { states: vec![] },
 };
 
 const CH1: Uuid = Uuid::from_u128(0x00000000_0000_0000_0000_000000000c01);
@@ -1429,7 +1426,9 @@ async fn channel_thread_rows_filter_by_notification_done_secondary_entity(
         .get_thread_messages(
             thread_rows_request(
                 USER_A,
-                thread_filter(ChannelThreadLiteral::NotificationDone(true)),
+                thread_filter(ChannelThreadLiteral::NotificationState(
+                    item_filters::NotificationState::Done,
+                )),
                 SimpleSortMethod::UpdatedAt,
                 50,
             )
@@ -1458,7 +1457,9 @@ async fn channel_thread_rows_filter_by_notification_seen_secondary_entity(
         .get_thread_messages(
             thread_rows_request(
                 USER_A,
-                thread_filter(ChannelThreadLiteral::NotificationSeen(true)),
+                thread_filter(ChannelThreadLiteral::NotificationState(
+                    item_filters::NotificationState::Seen,
+                )),
                 SimpleSortMethod::UpdatedAt,
                 50,
             )
@@ -2415,8 +2416,7 @@ async fn notification_done_filter_matches_top_level_messages_and_thread_replies(
 
     let filters = ChannelMessageFilters {
         notification_filters: NotificationFilters {
-            done: Some(true),
-            seen: None,
+            states: vec![item_filters::NotificationState::Done],
         },
         ..Default::default()
     };
@@ -2449,8 +2449,10 @@ async fn notification_not_done_filter_matches_top_level_messages_and_thread_repl
 
     let filters = ChannelMessageFilters {
         notification_filters: NotificationFilters {
-            done: Some(false),
-            seen: None,
+            states: vec![
+                item_filters::NotificationState::Unseen,
+                item_filters::NotificationState::Seen,
+            ],
         },
         ..Default::default()
     };
@@ -2483,8 +2485,10 @@ async fn notification_seen_filter_matches_top_level_messages_and_thread_replies(
 
     let filters = ChannelMessageFilters {
         notification_filters: NotificationFilters {
-            done: None,
-            seen: Some(true),
+            states: vec![
+                item_filters::NotificationState::Seen,
+                item_filters::NotificationState::Done,
+            ],
         },
         ..Default::default()
     };
@@ -2517,8 +2521,7 @@ async fn notification_not_seen_filter_matches_top_level_messages_and_thread_repl
 
     let filters = ChannelMessageFilters {
         notification_filters: NotificationFilters {
-            done: None,
-            seen: Some(false),
+            states: vec![item_filters::NotificationState::Unseen],
         },
         ..Default::default()
     };
@@ -2542,18 +2545,19 @@ async fn notification_not_seen_filter_matches_top_level_messages_and_thread_repl
     fixtures(path = "../../../fixtures", scripts("channels_repo")),
     migrator = "MACRO_DB_MIGRATIONS"
 )]
-async fn notification_done_and_seen_filters_match_soup_independent_exists_semantics(
+async fn notification_state_union_matches_any_selected_state(
     pool: Pool<Postgres>,
 ) -> anyhow::Result<()> {
-    // The unseen row satisfies not-done; the separate done row satisfies seen.
-    // Both rows are valid states, and neither alone satisfies both predicates.
+    // Either of the selected exact states may witness the filter.
     insert_channel_message_notification(&pool, USER_A, CH1, MSG3, false, false).await?;
     insert_channel_message_notification(&pool, USER_A, CH1, MSG3, true, true).await?;
 
     let filters = ChannelMessageFilters {
         notification_filters: NotificationFilters {
-            done: Some(false),
-            seen: Some(true),
+            states: vec![
+                item_filters::NotificationState::Unseen,
+                item_filters::NotificationState::Done,
+            ],
         },
         ..Default::default()
     };
@@ -2584,8 +2588,10 @@ async fn notification_filter_is_scoped_to_requesting_user(
 
     let filters = ChannelMessageFilters {
         notification_filters: NotificationFilters {
-            done: Some(false),
-            seen: None,
+            states: vec![
+                item_filters::NotificationState::Unseen,
+                item_filters::NotificationState::Seen,
+            ],
         },
         ..Default::default()
     };
@@ -2608,8 +2614,10 @@ async fn notification_filter_is_scoped_to_requesting_user(
 async fn notification_filter_requires_requesting_user(pool: Pool<Postgres>) -> anyhow::Result<()> {
     let filters = ChannelMessageFilters {
         notification_filters: NotificationFilters {
-            done: Some(false),
-            seen: None,
+            states: vec![
+                item_filters::NotificationState::Unseen,
+                item_filters::NotificationState::Seen,
+            ],
         },
         ..Default::default()
     };
