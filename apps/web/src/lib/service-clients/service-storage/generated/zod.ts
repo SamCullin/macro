@@ -3343,21 +3343,21 @@ export const postChannelMessagesBody = zod
       .describe('When non-empty, only return messages with these IDs.'),
     notification_filters: zod
       .object({
-        done: zod
-          .boolean()
-          .nullish()
+        states: zod
+          .array(
+            zod
+              .enum(['unseen', 'seen', 'done'])
+              .describe(
+                "The mutually exclusive lifecycle states of a user's notification."
+              )
+          )
+          .optional()
           .describe(
-            'Filter by notification done state. `Some(true)` selects done\nnotifications; `Some(false)` selects not-done notifications.'
-          ),
-        seen: zod
-          .boolean()
-          .nullish()
-          .describe(
-            'Filter by notification seen state. `Some(true)` selects seen\nnotifications; `Some(false)` selects not-seen notifications.'
+            'Include entities with a non-deleted notification in any of these exact states.\nEmpty means no notification restriction. Active means `[unseen, seen]`.'
           ),
       })
       .optional()
-      .describe('Notification state filters for channel message queries.'),
+      .describe('Notification-level filters that apply to an entity type.'),
   })
   .describe('Filters for channel message queries.');
 
@@ -12212,21 +12212,21 @@ export const postItemsSoupBody = zod
           ),
         notification_filters: zod
           .object({
-            done: zod
-              .boolean()
-              .nullish()
+            states: zod
+              .array(
+                zod
+                  .enum(['unseen', 'seen', 'done'])
+                  .describe(
+                    "The mutually exclusive lifecycle states of a user's notification."
+                  )
+              )
+              .optional()
               .describe(
-                'Filter by notification done state. `Some(true)` selects done\nnotifications; `Some(false)` selects not-done notifications.'
-              ),
-            seen: zod
-              .boolean()
-              .nullish()
-              .describe(
-                'Filter by notification seen state. `Some(true)` selects seen\nnotifications; `Some(false)` selects not-seen notifications.'
+                'Include entities with a non-deleted notification in any of these exact states.\nEmpty means no notification restriction. Active means `[unseen, seen]`.'
               ),
           })
           .optional()
-          .describe('Notification state filters for channel message queries.'),
+          .describe('Notification-level filters that apply to an entity type.'),
         org_id: zod
           .number()
           .nullish()
@@ -12303,21 +12303,21 @@ export const postItemsSoupBody = zod
           ),
         notification_filters: zod
           .object({
-            done: zod
-              .boolean()
-              .nullish()
+            states: zod
+              .array(
+                zod
+                  .enum(['unseen', 'seen', 'done'])
+                  .describe(
+                    "The mutually exclusive lifecycle states of a user's notification."
+                  )
+              )
+              .optional()
               .describe(
-                'Filter by notification done state. `Some(true)` selects done\nnotifications; `Some(false)` selects not-done notifications.'
-              ),
-            seen: zod
-              .boolean()
-              .nullish()
-              .describe(
-                'Filter by notification seen state. `Some(true)` selects seen\nnotifications; `Some(false)` selects not-seen notifications.'
+                'Include entities with a non-deleted notification in any of these exact states.\nEmpty means no notification restriction. Active means `[unseen, seen]`.'
               ),
           })
           .optional()
-          .describe('Notification state filters for channel message queries.'),
+          .describe('Notification-level filters that apply to an entity type.'),
         owners: zod
           .array(zod.string())
           .optional()
@@ -12388,21 +12388,21 @@ export const postItemsSoupBody = zod
           ),
         notification_filters: zod
           .object({
-            done: zod
-              .boolean()
-              .nullish()
+            states: zod
+              .array(
+                zod
+                  .enum(['unseen', 'seen', 'done'])
+                  .describe(
+                    "The mutually exclusive lifecycle states of a user's notification."
+                  )
+              )
+              .optional()
               .describe(
-                'Filter by notification done state. `Some(true)` selects done\nnotifications; `Some(false)` selects not-done notifications.'
-              ),
-            seen: zod
-              .boolean()
-              .nullish()
-              .describe(
-                'Filter by notification seen state. `Some(true)` selects seen\nnotifications; `Some(false)` selects not-seen notifications.'
+                'Include entities with a non-deleted notification in any of these exact states.\nEmpty means no notification restriction. Active means `[unseen, seen]`.'
               ),
           })
           .optional()
-          .describe('Notification state filters for channel message queries.'),
+          .describe('Notification-level filters that apply to an entity type.'),
         owners: zod
           .array(zod.string())
           .optional()
@@ -12493,6 +12493,12 @@ export const postItemsSoupBody = zod
           .describe(
             'Only include emails that have at least one of these labels. Supports both Gmail system labels (e.g. \"INBOX\", \"CATEGORY_PROMOTIONS\") and user-created labels (e.g. \"github\"). Empty to not filter by included labels.\nNote: SPAM and TRASH emails are not indexed in OpenSearch, so they will never appear in results regardless of this filter.'
           ),
+        is_read: zod
+          .boolean()
+          .nullish()
+          .describe(
+            "Filter by the email thread's read flag, independently of notification state."
+          ),
         link_ids: zod
           .array(zod.string())
           .optional()
@@ -12501,21 +12507,21 @@ export const postItemsSoupBody = zod
           ),
         notification_filters: zod
           .object({
-            done: zod
-              .boolean()
-              .nullish()
+            states: zod
+              .array(
+                zod
+                  .enum(['unseen', 'seen', 'done'])
+                  .describe(
+                    "The mutually exclusive lifecycle states of a user's notification."
+                  )
+              )
+              .optional()
               .describe(
-                'Filter by notification done state. `Some(true)` selects done\nnotifications; `Some(false)` selects not-done notifications.'
-              ),
-            seen: zod
-              .boolean()
-              .nullish()
-              .describe(
-                'Filter by notification seen state. `Some(true)` selects seen\nnotifications; `Some(false)` selects not-seen notifications.'
+                'Include entities with a non-deleted notification in any of these exact states.\nEmpty means no notification restriction. Active means `[unseen, seen]`.'
               ),
           })
           .optional()
-          .describe('Notification state filters for channel message queries.'),
+          .describe('Notification-level filters that apply to an entity type.'),
         project_ids: zod
           .array(zod.string())
           .optional()
@@ -12573,21 +12579,21 @@ export const postItemsSoupBody = zod
           ),
         notification_filters: zod
           .object({
-            done: zod
-              .boolean()
-              .nullish()
+            states: zod
+              .array(
+                zod
+                  .enum(['unseen', 'seen', 'done'])
+                  .describe(
+                    "The mutually exclusive lifecycle states of a user's notification."
+                  )
+              )
+              .optional()
               .describe(
-                'Filter by notification done state. `Some(true)` selects done\nnotifications; `Some(false)` selects not-done notifications.'
-              ),
-            seen: zod
-              .boolean()
-              .nullish()
-              .describe(
-                'Filter by notification seen state. `Some(true)` selects seen\nnotifications; `Some(false)` selects not-seen notifications.'
+                'Include entities with a non-deleted notification in any of these exact states.\nEmpty means no notification restriction. Active means `[unseen, seen]`.'
               ),
           })
           .optional()
-          .describe('Notification state filters for channel message queries.'),
+          .describe('Notification-level filters that apply to an entity type.'),
       })
       .optional()
       .describe('Filters for foreign entity records.'),
@@ -12607,21 +12613,21 @@ export const postItemsSoupBody = zod
           ),
         notification_filters: zod
           .object({
-            done: zod
-              .boolean()
-              .nullish()
+            states: zod
+              .array(
+                zod
+                  .enum(['unseen', 'seen', 'done'])
+                  .describe(
+                    "The mutually exclusive lifecycle states of a user's notification."
+                  )
+              )
+              .optional()
               .describe(
-                'Filter by notification done state. `Some(true)` selects done\nnotifications; `Some(false)` selects not-done notifications.'
-              ),
-            seen: zod
-              .boolean()
-              .nullish()
-              .describe(
-                'Filter by notification seen state. `Some(true)` selects seen\nnotifications; `Some(false)` selects not-seen notifications.'
+                'Include entities with a non-deleted notification in any of these exact states.\nEmpty means no notification restriction. Active means `[unseen, seen]`.'
               ),
           })
           .optional()
-          .describe('Notification state filters for channel message queries.'),
+          .describe('Notification-level filters that apply to an entity type.'),
         owners: zod
           .array(zod.string())
           .optional()
