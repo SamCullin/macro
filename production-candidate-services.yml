@@ -1,0 +1,120 @@
+# Candidate-only production overlay.  It deliberately reuses the existing
+# runtime image and mounts the candidate Linux binaries; no image build is
+# performed during cutover.
+volumes:
+  macro_cursor_kms_data:
+
+services:
+  localstack_kms:
+    image: localstack/localstack:4
+    environment:
+      SERVICES: kms,secretsmanager
+      DEFAULT_REGION: us-east-1
+    volumes:
+      - macro_cursor_kms_data:/var/lib/localstack
+    networks:
+      databases:
+        aliases:
+          - localstack-kms
+      services:
+        aliases:
+          - localstack-kms
+
+  scheduled_action_service:
+    image: macro-local-runtime:dev
+    build: !reset null
+    command: [/app/out/service]
+    env_file:
+      - /opt/macro/infra/local/generated/macro-prod/local.generated.env
+    environment:
+      OVERRIDE_CONNECTION_GATEWAY_URL: http://connection-gateway:8080
+      ANTHROPIC_API_KEY: ${LITELLM_API_KEY}
+      ANTHROPIC_BASE_URL: ${LITELLM_BASE_URL}
+    depends_on:
+      - postgres
+      - authentication-service
+      - connection_gateway
+    networks:
+      databases:
+      services:
+        aliases:
+          - scheduled-action-service
+    healthcheck:
+      test: [CMD, curl, -f, http://localhost:8080/health]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - /opt/macro-candidate/target/x86_64-unknown-linux-gnu/debug:/app/out:ro
+
+  agent_harness_service:
+    image: macro-local-runtime:dev
+    build: !reset null
+    command: ["/app/out/agent_harness_service"]
+    env_file:
+      - /opt/macro/infra/local/generated/macro-prod/local.generated.env
+    environment:
+      HARNESS_BOT_ID: 00000000-0000-0000-0000-00000000a9e7
+      EGRESS_BASE_URL: https://macro.thatandthat.org/agent-egress
+      MACRO_MCP_URL: http://mcp-service:8080/mcp
+      LOCAL_AWS_URL: http://localstack-kms:4566
+      # This deployment uses the authenticated LiteLLM gateway.  Keep the
+      # direct-provider variables empty so the agent cannot silently send
+      # requests to upstream providers with local boot values.
+      ANTHROPIC_API_KEY: ""
+      OPENAI_API_KEY: ""
+      CEREBRAS_API_KEY: ""
+      LITELLM_BASE_URL: https://llm.thatandthat.org/v1
+      LITELLM_API_KEY: ${LITELLM_API_KEY:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /opt/macro-candidate/target/x86_64-unknown-linux-gnu/debug:/app/out:ro
+    networks:
+      auth: {}
+      databases: {}
+      services:
+        aliases:
+          - agent-harness-service
+    depends_on:
+      - localstack_kms
+
+  mcp_service:
+    image: macro-local-runtime:dev
+    build: !reset null
+    volumes:
+      - /opt/macro-candidate/target/x86_64-unknown-linux-gnu/debug:/app/out:ro
+    environment:
+      APP_BASE_URL: https://macro.thatandthat.org/app
+      LOCAL_AWS_URL: http://localstack:4566
+
+  authentication-service:
+    environment:
+      APP_BASE_URL: https://macro.thatandthat.org
+      CURSOR_API_KEY_KMS_KEY_ID: alias/macro-cursor-api-keys
+      LOCAL_AWS_URL: http://localstack-kms:4566
+    depends_on:
+      - localstack_kms
+
+  document_cognition_service:
+    env_file:
+      - /opt/macro/infra/local/generated/macro-prod/local.generated.env
+    environment:
+      LOCAL_AWS_URL: http://localstack:4566
+      ANTHROPIC_API_KEY: ${LITELLM_API_KEY:-}
+      ANTHROPIC_BASE_URL: https://llm.thatandthat.org
+
+  document_storage_service:
+    environment:
+      APP_BASE_URL: https://macro.thatandthat.org
+      LOCAL_AWS_URL: http://localstack:4566
+      ANTHROPIC_API_KEY: ${LITELLM_API_KEY:-}
+      ANTHROPIC_BASE_URL: https://llm.thatandthat.org
+
+  email_service:
+    environment:
+      LOCAL_AWS_URL: http://localstack:4566
+
+  email_pubsub_workers:
+    environment:
+      LOCAL_AWS_URL: http://localstack:4566
