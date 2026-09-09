@@ -3,6 +3,7 @@ use bytes::{Bytes, BytesMut};
 use futures::{StreamExt, stream};
 use lol_html::html_content::Element;
 use lol_html::{HtmlRewriter, Settings, element};
+use macro_aws_config::transform_aws_url_for_internal_fetch;
 use models_email::email::service::{message, thread};
 use scraper::{Html, Selector};
 use sqlx::PgPool;
@@ -247,7 +248,8 @@ pub async fn fetch_and_upload_to_sfs(
 // fetches image data from the given URL, returning None for non-HTTP(S) or unparseable URLs
 #[tracing::instrument(skip(original_url_str))]
 async fn fetch_image(original_url_str: &str) -> anyhow::Result<Option<Bytes>> {
-    let url_to_fetch = match Url::parse(original_url_str) {
+    let internal_url = transform_aws_url_for_internal_fetch(original_url_str);
+    let url_to_fetch = match Url::parse(&internal_url) {
         Ok(mut url) => {
             if url.scheme() != "http" && url.scheme() != "https" {
                 tracing::warn!("Skipping URL with non-HTTP(S) scheme: {}", original_url_str);

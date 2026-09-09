@@ -1,6 +1,7 @@
 use super::StaticFileServiceClient;
 use anyhow::{Context, Result};
 use bytes::Bytes;
+use macro_aws_config::transform_aws_url_for_internal_fetch;
 use reqwest::header::CONTENT_TYPE;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -76,7 +77,7 @@ impl StaticFileServiceClient {
 
         let put_file_data: PutFileResponse = serde_json::from_value(res)?;
 
-        let presigned_url = put_file_data.upload_url.clone();
+        let presigned_url = transform_aws_url_for_internal_fetch(&put_file_data.upload_url);
 
         let upload_response = self
             .client

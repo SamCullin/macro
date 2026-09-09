@@ -15883,6 +15883,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes",
+ "macro_aws_config",
  "macro_service_urls",
  "models_sfs",
  "reqwest 0.13.4",
