@@ -37,6 +37,10 @@ rows and date headers by when you were last notified about the item, so a fresh 
 on an old task sits under "Today"; with it off they order by content recency. Keyboard:
 `j`/`k` move between rows and update the preview; alternate activation opens a new split.
 
+Notifications have three lifecycle states: `unseen`, `seen`, and `done`. Active means
+unseen or seen. Viewing must not reopen a done notification; undoing done returns it
+to seen, not unseen. Email read/unread is separate from notification lifecycle state.
+
 ## Email — `/app/component/mail`
 
 Full email client. Tabs: `Signal` / `Noise` / `Sent` / `Calendar` / `Drafts` / `Shared` /
