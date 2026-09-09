@@ -11169,6 +11169,7 @@ dependencies = [
  "model-error-response",
  "model_user",
  "models_pagination",
+ "notification_state",
  "rate_limit",
  "rdkafka",
  "redis",

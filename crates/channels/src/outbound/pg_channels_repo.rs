@@ -925,9 +925,9 @@ fn build_channel_list_filter(ast: Option<&Expr<ChannelLiteral>>) -> String {
                 "c.id",
                 "channel",
                 if done {
-                    "un.done = true"
+                    "un.state = 'done'"
                 } else {
-                    "un.done = false"
+                    "un.state <> 'done'"
                 },
             )
         }
@@ -936,9 +936,9 @@ fn build_channel_list_filter(ast: Option<&Expr<ChannelLiteral>>) -> String {
                 "c.id",
                 "channel",
                 if seen {
-                    "un.seen_at IS NOT NULL"
+                    "un.state <> 'unseen'"
                 } else {
-                    "un.seen_at IS NULL"
+                    "un.state = 'unseen'"
                 },
             )
         }
@@ -1039,9 +1039,9 @@ fn push_channel_thread_filter_expr(
                 builder,
                 user_id,
                 if *done {
-                    "un.done = true"
+                    "un.state = 'done'"
                 } else {
-                    "un.done = false"
+                    "un.state <> 'done'"
                 },
             );
         }
@@ -1050,9 +1050,9 @@ fn push_channel_thread_filter_expr(
                 builder,
                 user_id,
                 if *seen {
-                    "un.seen_at IS NOT NULL"
+                    "un.state <> 'unseen'"
                 } else {
-                    "un.seen_at IS NULL"
+                    "un.state = 'unseen'"
                 },
             );
         }
@@ -1801,7 +1801,7 @@ impl ChannelRepo for PgChannelsRepo {
                               JOIN comms_messages msg ON msg.id = (n.metadata->>'messageId')::uuid
                               WHERE un.user_id = $13::text
                                 AND un.deleted_at IS NULL
-                                AND un.done = $11
+                                AND (un.state = 'done') = $11
                                 AND n.event_item_type = 'channel'
                                 AND n.event_item_id = $1::uuid::text
                                 AND n.metadata->>'messageId' IS NOT NULL
@@ -1816,7 +1816,7 @@ impl ChannelRepo for PgChannelsRepo {
                               JOIN comms_messages msg ON msg.id = (n.metadata->>'messageId')::uuid
                               WHERE un.user_id = $13::text
                                 AND un.deleted_at IS NULL
-                                AND (un.seen_at IS NOT NULL) = $12
+                                AND (un.state <> 'unseen') = $12
                                 AND n.event_item_type = 'channel'
                                 AND n.event_item_id = $1::uuid::text
                                 AND n.metadata->>'messageId' IS NOT NULL
@@ -1894,7 +1894,7 @@ impl ChannelRepo for PgChannelsRepo {
                               JOIN comms_messages msg ON msg.id = (n.metadata->>'messageId')::uuid
                               WHERE un.user_id = $13::text
                                 AND un.deleted_at IS NULL
-                                AND un.done = $11
+                                AND (un.state = 'done') = $11
                                 AND n.event_item_type = 'channel'
                                 AND n.event_item_id = $1::uuid::text
                                 AND n.metadata->>'messageId' IS NOT NULL
@@ -1909,7 +1909,7 @@ impl ChannelRepo for PgChannelsRepo {
                               JOIN comms_messages msg ON msg.id = (n.metadata->>'messageId')::uuid
                               WHERE un.user_id = $13::text
                                 AND un.deleted_at IS NULL
-                                AND (un.seen_at IS NOT NULL) = $12
+                                AND (un.state <> 'unseen') = $12
                                 AND n.event_item_type = 'channel'
                                 AND n.event_item_id = $1::uuid::text
                                 AND n.metadata->>'messageId' IS NOT NULL
