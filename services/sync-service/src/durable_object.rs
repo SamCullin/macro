@@ -1384,6 +1384,7 @@ pub static ALLOWED_ORIGINS: &[&str] = &[
     "https://staging.macro.com",
     "https://www.macro.com",
     "https://macro.com",
+    "https://macro.thatandthat.org",
     "capacitor://localhost",
     "https://apollo-testing.macro.com",
 ];

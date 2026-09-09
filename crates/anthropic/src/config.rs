@@ -22,8 +22,14 @@ impl Config {
             "anthropic-version",
             "2023-06-01".parse().expect("good version"),
         );
+        let api_base = std::env::var("ANTHROPIC_BASE_URL")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| ANTHROPIC_ROUTER_BASE_URL.to_owned())
+            .trim_end_matches('/')
+            .to_owned();
         Self {
-            api_base: ANTHROPIC_ROUTER_BASE_URL.into(),
+            api_base,
             headers,
         }
     }

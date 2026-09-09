@@ -121,3 +121,6 @@ services:
   email_pubsub_workers:
     environment:
       LOCAL_AWS_URL: http://localstack:4566
+  ai_editing_worker:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""

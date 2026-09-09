@@ -41,9 +41,14 @@ use crate::stream::{ChatCompletionStream, StreamPart};
 env_var! {
     struct ApiKeys {
         AnthropicApiKey,
-        OpenaiApiKey,
-        CerebrasApiKey
+        OpenaiApiKey
     }
+}
+
+maybe_env_var! {
+    /// Optional Cerebras API key; absent means the Cerebras-compatible provider
+    /// is not registered.
+    struct CerebrasApiKey;
 }
 
 maybe_env_var! {
@@ -258,25 +263,39 @@ impl ModelRouter {
 
     /// Build a router with the built-in providers from the environment.
     ///
-    /// Requires `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `CEREBRAS_API_KEY`.
+    /// Requires `ANTHROPIC_API_KEY` and `OPENAI_API_KEY`; `CEREBRAS_API_KEY` is optional.
     /// Chain [`with_openai_provider`](Self::with_openai_provider) to add more.
     pub fn try_from_env() -> Result<Self, AgentError> {
         let env = ApiKeys::new()?;
-        let anthropic = anthropic::Client::builder()
-            .api_key(env.anthropic_api_key.to_string())
-            .build()?;
+        let anthropic_base_url = std::env::var("ANTHROPIC_BASE_URL")
+            .ok()
+            .filter(|url| !url.trim().is_empty());
+        let anthropic_builder = anthropic::Client::builder()
+            .api_key(env.anthropic_api_key.to_string());
+        let anthropic = match anthropic_base_url {
+            Some(base_url) => anthropic_builder.base_url(base_url).build()?,
+            None => anthropic_builder.build()?,
+        };
         // Default base URL is api.openai.com; OpenAI's GPT models use
         // Responses API so reasoning models get max_output_tokens.
-        let openai = openai::Client::builder()
-            .api_key(env.openai_api_key.to_string())
-            .build()?;
+        let openai_base_url = std::env::var("OPENAI_BASE_URL")
+            .ok()
+            .filter(|url| !url.trim().is_empty());
+        let openai_builder = openai::Client::builder()
+            .api_key(env.openai_api_key.to_string());
+        let openai = match openai_base_url {
+            Some(base_url) => openai_builder.base_url(base_url).build()?,
+            None => openai_builder.build()?,
+        };
+        let mut router = Self::new(anthropic, openai);
         // Cerebras speaks the OpenAI Chat Completions API, so it rides the
-        // compatible-provider registry: `cerebras/<model>` ids route to it.
-        let router = Self::new(anthropic, openai).with_openai_provider(
-            CEREBRAS_PROVIDER,
-            CEREBRAS_BASE_URL,
-            &env.cerebras_api_key,
-        )?;
+        // compatible-provider registry when the optional credential exists.
+        if let Some(api_key) = CerebrasApiKey::new()
+            .and_then(|key| key.value().map(str::to_owned))
+            .filter(|key| !key.is_empty())
+        {
+            router = router.with_openai_provider(CEREBRAS_PROVIDER, CEREBRAS_BASE_URL, &api_key)?;
+        }
 
         let Some(api_key) = LitellmApiKey::new()
             .and_then(|key| key.value().map(str::to_owned))

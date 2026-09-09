@@ -497,7 +497,7 @@ async fn main() -> anyhow::Result<()> {
                             .filter(|origin| !origin.is_empty())
                             .collect(),
                         None => match config.environment {
-                            Environment::Production => vec!["https://macro.com".to_owned()],
+                            Environment::Production => vec!["https://macro.thatandthat.org".to_owned()],
                             Environment::Develop => vec![
                                 "https://dev.macro.com".to_owned(),
                                 "http://localhost:3000".to_owned(),

@@ -17,6 +17,7 @@ const ALLOWED_ORIGINS = new Set([
   'https://dev.macro.com',
   'https://www.macro.com',
   'https://macro.com',
+  'https://macro.thatandthat.org',
   'http://tauri.localhost',
   'tauri://localhost',
 ]);

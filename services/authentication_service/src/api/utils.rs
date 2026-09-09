@@ -9,6 +9,7 @@ use url::Url;
 
 maybe_env_vars! {
     struct FrontendPort;
+    struct PublicAppUrl;
 }
 
 /// Generates a random 25 character session code
@@ -45,9 +46,18 @@ pub fn generate_session_code() -> String {
 
     code_chars.into_iter().collect()
 }
+fn configured_public_app_url() -> Option<Url> {
+    PublicAppUrl::new()
+        .and_then(|url| url.value().and_then(|value| Url::parse(value).ok()))
+}
+
 
 /// Returns the default redirect url based on the environment
 pub fn default_redirect_url() -> Url {
+    if let Some(public_app_url) = configured_public_app_url() {
+        return public_app_url;
+    }
+
     match Environment::new_or_prod() {
         Environment::Local => {
             let port = FrontendPort::new()
@@ -60,10 +70,14 @@ pub fn default_redirect_url() -> Url {
     }
 }
 
-fn domain<'a>() -> Option<&'a str> {
+fn domain() -> Option<String> {
+    if let Some(public_app_url) = configured_public_app_url() {
+        return public_app_url.domain().map(str::to_owned);
+    }
+
     match Environment::new_or_prod() {
         Environment::Local => None,
-        Environment::Production | Environment::Develop => Some("macro.com"),
+        Environment::Production | Environment::Develop => Some("macro.com".to_owned()),
     }
 }
 

@@ -1,3 +1,8 @@
+use macro_env_var::maybe_env_var;
+
+maybe_env_var! {
+    struct PublicAppUrl;
+}
 pub(crate) static INVITE_USER_SUBJECT: &str = "Invitation to Macro";
 
 /// Builds the user invite message
@@ -121,7 +126,7 @@ pub(crate) fn build_user_invite_message(org_name: &str, environment: &str) -> St
                                         You've been invited to join {ORG_NAME} on Macro.
                                     </h2>
                                     <p style="text-align: center;">
-                                        <a class="CTA" href="https://{PREFIX}macro.com/app/?login=true">Accept Your Invitation</a>
+                                        <a class="CTA" href="{APP_URL}/?login=true">Accept Your Invitation</a>
                                     </p>
                                  </td>
                               </tr>
@@ -144,8 +149,13 @@ pub(crate) fn build_user_invite_message(org_name: &str, environment: &str) -> St
    </body>
 </html>"#;
 
-    let result = result.replace("{PREFIX}", prefix.as_str());
-    result.replace("{ORG_NAME}", org_name)
+    let default_app_url = format!("https://{prefix}macro.com/app");
+    let app_url = PublicAppUrl::new()
+        .and_then(|url| url.value().map(str::to_owned))
+        .unwrap_or(default_app_url);
+    result
+        .replace("{APP_URL}", app_url.trim_end_matches('/'))
+        .replace("{ORG_NAME}", org_name)
 }
 
 #[cfg(test)]

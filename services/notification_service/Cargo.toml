@@ -70,6 +70,7 @@ rate_limit = { path = "../../crates/rate_limit" }
 redis = { workspace = true }
 regex = { workspace = true }
 secretsmanager_client = { path = "../../crates/secretsmanager_client" }
+ses_client = { path = "../../crates/ses_client" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

@@ -46,7 +46,7 @@ maybe_env_vars!(
     pub struct PipedreamMcpUrl;
     /// Comma-separated browser origins allowed to embed Pipedream's hosted
     /// Connect UI (sent as the Connect token's `allowed_origins`). Defaults
-    /// by deploy environment: the app origin (`https://macro.com` /
+    /// by deploy environment: the app origin (`https://macro.thatandthat.org` /
     /// `https://dev.macro.com`) plus localhost outside production.
     pub struct PipedreamAllowedOrigins;
 );

@@ -231,8 +231,11 @@ pub async fn main() -> anyhow::Result<()> {
         voip_bundle_id: None,
     };
 
-    let ses_client = aws_sdk_sesv2::Client::new(&aws_config);
-    let email_adapter = EmailAdapter::new(ses_client, crate::env::SENDER_ADDRESS.clone());
+    let email_service = ses_client::SesClient::from_env(
+        aws_sdk_sesv2::Client::new(&aws_config),
+        &config.environment.to_string(),
+    );
+    let email_adapter = EmailAdapter::new(email_service, crate::env::SENDER_ADDRESS.clone());
 
     let redis_multiplexed_conn = redis_client
         .get_multiplexed_async_connection()

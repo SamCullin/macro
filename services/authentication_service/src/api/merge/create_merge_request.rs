@@ -11,6 +11,7 @@ use utoipa::ToSchema;
 
 use crate::{
     api::context::{ApiContext, AuthorizationService},
+    config::SENDER_ADDRESS,
     rate_limit_config::RATE_LIMIT_CONFIG,
 };
 
@@ -149,7 +150,7 @@ pub async fn handler(
     if let Err(e) = ctx
         .ses_client
         .send_email(
-            "auth@macro.com",        // from email
+            SENDER_ADDRESS.as_str(), // from email
             &req.email,              // to email
             "Account Merge Request", // subject
             &content,                // content

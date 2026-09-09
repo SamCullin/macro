@@ -41,6 +41,7 @@ type HmacSha256 = Hmac<Sha256>;
 
 maybe_env_vars! {
     struct FrontendPort;
+    struct PublicAppUrl;
 }
 
 /// Github sync config
@@ -1170,6 +1171,9 @@ fn create_macro_task_comment_link(name: &str, id: &str) -> String {
         macro_env::Environment::Production => "https://macro.com/app/task",
         macro_env::Environment::Develop => "https://dev.macro.com/app/task",
         macro_env::Environment::Local => {
+            if let Some(public_app_url) = PublicAppUrl::new().and_then(|url| url.value().map(str::to_owned)) {
+                return format!("[{name}]({}/task/{id})", public_app_url.trim_end_matches('/'));
+            }
             let port = FrontendPort::new()
                 .map(|port| port.to_string())
                 .unwrap_or_else(|| "3000".to_string());

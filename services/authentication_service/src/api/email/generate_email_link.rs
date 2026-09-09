@@ -11,7 +11,7 @@ use utoipa::ToSchema;
 
 use crate::{
     api::context::{ApiContext, AuthorizationService},
-    config::BASE_URL,
+    config::{BASE_URL, SENDER_ADDRESS},
     rate_limit_config::RATE_LIMIT_CONFIG,
 };
 
@@ -186,7 +186,7 @@ pub async fn handler(
         .replace("{{VERIFICATION_ID}}", &link_id.to_string());
     ctx.ses_client
         .send_email(
-            "auth@macro.com",
+            SENDER_ADDRESS.as_str(),
             &req.email,
             "Verify your email address",
             &content,

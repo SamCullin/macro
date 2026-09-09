@@ -1,7 +1,7 @@
 use axum::http::HeaderValue;
 use std::time::Duration;
 
-pub const ORIGINS: [HeaderValue; 23] = [
+pub const ORIGINS: [HeaderValue; 24] = [
     HeaderValue::from_static("http://localhost:3000"),
     HeaderValue::from_static("http://localhost:3001"),
     HeaderValue::from_static("http://localhost:3002"),
@@ -25,6 +25,7 @@ pub const ORIGINS: [HeaderValue; 23] = [
     HeaderValue::from_static("https://prod.macro.com"),
     HeaderValue::from_static("https://www.macro.com"),
     HeaderValue::from_static("https://macro.com"),
+    HeaderValue::from_static("https://macro.thatandthat.org"),
 ];
 
 /// The default timeout threshold is 1 minute

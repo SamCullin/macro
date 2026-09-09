@@ -15,8 +15,17 @@ pub static BASE_URL: LazyLock<String> = LazyLock::new(|| {
         .to_string()
 });
 
+/// Sender address used by authentication emails; it must belong to the
+/// verified production sending domain.
+pub static SENDER_ADDRESS: LazyLock<String> = LazyLock::new(|| {
+    let sender_base_address = SenderBaseAddress::new()
+        .expect("SENDER_BASE_ADDRESS must be provided via APP_SECRETS_JSON or env");
+    format!("auth@{}", sender_base_address.as_ref())
+});
+
 env_vars! {
     pub struct BaseUrl;
+    pub struct SenderBaseAddress;
     pub struct FusionAuthApiSecretKey;
     pub struct FusionAuthClientId;
     pub struct FusionAuthClientSecretKey;

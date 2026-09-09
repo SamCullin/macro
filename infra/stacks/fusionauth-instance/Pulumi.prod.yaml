@@ -10,7 +10,7 @@ config:
   fusionauth-instance:fusionauth-signing-key-id: 32bf13d6-8006-4a1f-b5e9-e8aa7b99922b
   fusionauth-instance:smtp-user-secret-key: smtp-user
   fusionauth-instance:fusionauth-issuer: auth.macro.com
-  fusionauth-instance:default-from-email: auth@macro.com
+  fusionauth-instance:default-from-email: auth@thatandthat.org
   fusionauth-instance:fusionauth-google-idp-id: 3707ffc1-c785-4537-a537-10c9ba363e1e
   fusionauth-instance:fusionauth-google-gmail-idp-id: 33fbd135-08c1-4975-8987-cf2456752c2d
   fusionauth-instance:google-client-id-secret-key: google-client-id-prod
