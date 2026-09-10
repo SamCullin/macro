@@ -47,6 +47,7 @@ export default defineConfig({
     },
     environment: 'jsdom',
     globals: true,
+    setupFiles: [fileURLToPath(new URL('./vitest.setup.ts', import.meta.url))],
     server: {
       deps: {
         inline: [
