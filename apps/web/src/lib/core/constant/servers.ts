@@ -86,7 +86,7 @@ function resolveProxyOrigin(configured: string | undefined) {
 export const SERVER_HOSTS: Servers =
   import.meta.env.MODE === 'development'
     ? selectLocalServers()
-    : serverHostRemote;
+    : proxyServers() ?? serverHostRemote;
 
 function proxyServers(): Servers | undefined {
   if (!proxyOrigin || !wsProxyOrigin) return undefined;
