@@ -4,6 +4,23 @@ import { createWebTracingProvider } from '@macro-inc/observability/web';
 // This static import loads the zone.js Promise patch before application modules run.
 import { ZoneContextManager } from '@macro-inc/observability/zone';
 
+// Browser layout notifications are surfaced as window errors by Chromium, but
+// they are not application failures and can occur during normal panel resize.
+const IGNORABLE_BROWSER_ERRORS = new Set([
+  'ResizeObserver loop completed with undelivered notifications',
+  'ResizeObserver loop limit exceeded',
+]);
+
+function isIgnorableBrowserError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'string'
+        ? error
+        : undefined;
+  return message !== undefined && IGNORABLE_BROWSER_ERRORS.has(message);
+}
+
 async function browserTelemetryEnabled(hasExporter: boolean): Promise<boolean> {
   const override = import.meta.env.VITE_ENABLE_BROWSER_OTEL;
 
@@ -67,11 +84,16 @@ export async function initializeBrowserObservability(): Promise<void> {
 
   window.addEventListener('pagehide', () => void Telemetry.flush());
   window.addEventListener('error', (event) => {
-    Telemetry.error(event.error ?? event.message, {
+    const error = event.error ?? event.message;
+    if (isIgnorableBrowserError(error)) return;
+
+    Telemetry.error(error, {
       'error.source': 'window',
     });
   });
   window.addEventListener('unhandledrejection', (event) => {
+    if (isIgnorableBrowserError(event.reason)) return;
+
     Telemetry.error(event.reason, {
       'error.source': 'unhandledrejection',
     });
