@@ -2,6 +2,7 @@ import { AnimatedFileMdIcon } from '@icon/wide-fileMd';
 import { AnimatedTaskIcon } from '@icon/wide-task';
 import TagIcon from '@phosphor/tag.svg';
 import type { Component } from 'solid-js';
+import { getWebOrigin } from '@core/util/webOrigin';
 
 /**
  * One "put the agent to work" example: the row's copy plus the prompt it
@@ -18,8 +19,9 @@ export type AgentExample = {
 };
 
 /** App links the example prompts ask the agent to include in its reply. */
-const MANAGE_TAGS_LINK = 'macro.com/app/settings/tags';
-const TASKS_LIST_LINK = 'macro.com/app/component/tasks';
+const APP_ORIGIN = getWebOrigin();
+const MANAGE_TAGS_LINK = `${APP_ORIGIN}/app/settings/tags`;
+const TASKS_LIST_LINK = `${APP_ORIGIN}/app/component/tasks`;
 
 export const AGENT_EXAMPLES: AgentExample[] = [
   {
