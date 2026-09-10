@@ -1,8 +1,8 @@
+import { getWebOrigin } from '@core/util/webOrigin';
 import { AnimatedFileMdIcon } from '@icon/wide-fileMd';
 import { AnimatedTaskIcon } from '@icon/wide-task';
 import TagIcon from '@phosphor/tag.svg';
 import type { Component } from 'solid-js';
-import { getWebOrigin } from '@core/util/webOrigin';
 
 /**
  * One "put the agent to work" example: the row's copy plus the prompt it

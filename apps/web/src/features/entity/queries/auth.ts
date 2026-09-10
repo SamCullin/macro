@@ -3,8 +3,8 @@ import { SERVER_HOSTS } from '@core/constant/servers';
 import { fetchWithToken } from '@core/util/fetchWithToken';
 import type { MacroApiTokenResponse } from '@service-auth/generated/schemas/macroApiTokenResponse';
 import {
+  type QueryOptions,
   queryOptions,
-  type SolidQueryOptions,
   useQuery,
 } from '@tanstack/solid-query';
 
@@ -58,12 +58,7 @@ export const fetchApiToken = async () => {
   return result.value.macro_api_token;
 };
 
-type ApiTokenQueryOptions = SolidQueryOptions<
-  string,
-  Error,
-  string,
-  string[]
-> & {
+type ApiTokenQueryOptions = QueryOptions<string, Error, string, string[]> & {
   initialData?: undefined;
 };
 function createApiTokenQueryOptions(): ApiTokenQueryOptions {
