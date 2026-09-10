@@ -46,7 +46,14 @@ else
   prefix=''
 fi
 current_key=${prefix:+$prefix/}$relative_key
-cutoff=$(date -u -d "$retention_days days ago" '+%Y-%m-%dT%H:%M:%SZ')
+if cutoff=$(date -u -d "$retention_days days ago" '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null); then
+  :
+elif cutoff=$(date -u -v-"${retention_days}"d '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null); then
+  :
+else
+  echo "unable to calculate the retention cutoff date" >&2
+  exit 1
+fi
 list_args=(s3api list-objects-v2 --bucket "$bucket")
 if [ -n "$prefix" ]; then
   list_args+=(--prefix "$prefix/")

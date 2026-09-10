@@ -29,6 +29,9 @@ export default defineConfig({
   },
   test: {
     exclude: [...configDefaults.exclude],
+    setupFiles: [
+      fileURLToPath(new URL('./src/lib/core/vitest.setup.ts', import.meta.url)),
+    ],
     projects: [
       '../../packages/collaboration/vitest.collab.config.ts',
       '../../packages/collaboration/vitest.transport.config.ts',
@@ -59,6 +62,11 @@ export default defineConfig({
         },
         test: {
           environment: 'jsdom',
+          setupFiles: [
+            fileURLToPath(
+              new URL('./src/lib/core/vitest.setup.ts', import.meta.url)
+            ),
+          ],
           include: ['src/lib/graphql-cache/**/*.{test,spec}.{ts,tsx}'],
           name: 'graphql-cache',
         },
@@ -72,6 +80,11 @@ export default defineConfig({
         },
         test: {
           environment: 'jsdom',
+          setupFiles: [
+            fileURLToPath(
+              new URL('./src/lib/core/vitest.setup.ts', import.meta.url)
+            ),
+          ],
           include: ['src/lib/urql-solid/**/*.{test,spec}.{ts,tsx}'],
           name: 'urql-solid',
         },
@@ -86,6 +99,11 @@ export default defineConfig({
         test: {
           environment: 'jsdom',
           globals: true,
+          setupFiles: [
+            fileURLToPath(
+              new URL('./src/lib/core/vitest.setup.ts', import.meta.url)
+            ),
+          ],
           include: ['../../packages/lexical-core/**/*.{test,spec}.{ts,tsx}'],
           name: 'lexical-core',
         },
@@ -95,6 +113,11 @@ export default defineConfig({
         test: {
           environment: 'jsdom',
           globals: true,
+          setupFiles: [
+            fileURLToPath(
+              new URL('./src/lib/core/vitest.setup.ts', import.meta.url)
+            ),
+          ],
           include: ['src/features/theme/**/*.{test,spec}.{ts,tsx}'],
           name: 'theme',
         },
@@ -147,6 +170,11 @@ export default defineConfig({
         // opts a test into a DOM; the default here stays node.
         plugins: [tsconfigPaths()],
         test: {
+          setupFiles: [
+            fileURLToPath(
+              new URL('./src/lib/core/vitest.setup.ts', import.meta.url)
+            ),
+          ],
           include: ['src/features/block-email/**/*.{test,spec}.{ts,tsx}'],
           name: 'block-email',
         },
