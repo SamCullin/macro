@@ -139,6 +139,14 @@ services:
   notification_service:
     env_file:
       - /opt/macro/infra/local/generated/macro-prod/local.generated.env
+
+  sync_service:
+    environment:
+      # The self-hosted production stack does not include an otel-collector
+      # container; disable the optional worker exporter instead of emitting
+      # repeated DNS errors on every health request.
+      OTEL_EXPORTER_OTLP_ENDPOINT: ""
+
   ai_editing_worker:
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: ""
