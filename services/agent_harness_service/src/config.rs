@@ -25,9 +25,13 @@ macro_env_var::env_vars!(
     /// Issuer stamped into minted Macro API tokens; must match what the
     /// validators expect.
     pub struct MacroApiTokenIssuer;
+);
+
+macro_env_var::maybe_env_vars!(
     /// OAuth client ID for the Pipedream API. The same credentials
     /// `document_cognition_service` uses: the connections a sandbox spends
-    /// are the ones the person connected in Macro, in the same rows.
+    /// are the ones the person connected in Macro, in the same rows. The
+    /// native MCP stack remains fully usable when Pipedream is not configured.
     pub struct PipedreamClientId;
     /// OAuth client secret for the Pipedream API.
     pub struct PipedreamClientSecret;

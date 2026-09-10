@@ -82,6 +82,8 @@ services:
   mcp_service:
     image: macro-local-runtime:dev
     build: !reset null
+    env_file:
+      - /opt/macro/infra/local/generated/macro-prod/local.generated.env
     volumes:
       - /opt/macro-candidate/target/x86_64-unknown-linux-gnu/debug:/app/out:ro
     environment:
@@ -89,12 +91,18 @@ services:
       LOCAL_AWS_URL: http://localstack:4566
 
   authentication-service:
+    env_file:
+      - /opt/macro/infra/local/generated/macro-prod/local.generated.env
     environment:
       APP_BASE_URL: https://macro.thatandthat.org
       CURSOR_API_KEY_KMS_KEY_ID: alias/macro-cursor-api-keys
       LOCAL_AWS_URL: http://localstack-kms:4566
     depends_on:
       - localstack_kms
+
+  connection_gateway:
+    env_file:
+      - /opt/macro/infra/local/generated/macro-prod/local.generated.env
 
   document_cognition_service:
     env_file:
@@ -106,6 +114,8 @@ services:
       OPENAI_BASE_URL: https://llm.thatandthat.org/v1/chat/completions
 
   document_storage_service:
+    env_file:
+      - /opt/macro/infra/local/generated/macro-prod/local.generated.env
     environment:
       APP_BASE_URL: https://macro.thatandthat.org
       LOCAL_AWS_URL: http://localstack:4566
@@ -115,12 +125,20 @@ services:
       OPENAI_BASE_URL: ${LITELLM_BASE_URL}
 
   email_service:
+    env_file:
+      - /opt/macro/infra/local/generated/macro-prod/local.generated.env
     environment:
       LOCAL_AWS_URL: http://localstack:4566
 
   email_pubsub_workers:
+    env_file:
+      - /opt/macro/infra/local/generated/macro-prod/local.generated.env
     environment:
       LOCAL_AWS_URL: http://localstack:4566
+
+  notification_service:
+    env_file:
+      - /opt/macro/infra/local/generated/macro-prod/local.generated.env
   ai_editing_worker:
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: ""

@@ -273,11 +273,25 @@ async fn run() -> anyhow::Result<()> {
     let mcp_connections = Arc::new(PgConnectionRepo::new(pool.clone()));
 
     // The client that addresses Pipedream's remote MCP server, built from the
-    // same credentials `document_cognition_service` uses.
+    // same credentials `document_cognition_service` uses. Pipedream is an
+    // optional connector stack: the native Macro MCP server and external
+    // sessions must still boot when this deployment has not configured a
+    // Pipedream project.
+    let pipedream_client_id = config.pipedream_client_id.value().unwrap_or("");
+    let pipedream_client_secret = config.pipedream_client_secret.value().unwrap_or("");
+    let pipedream_project_id = config.pipedream_project_id.value().unwrap_or("");
+    if pipedream_client_id.is_empty()
+        || pipedream_client_secret.is_empty()
+        || pipedream_project_id.is_empty()
+    {
+        tracing::warn!(
+            "Pipedream credentials are not configured; Pipedream-backed connectors are disabled"
+        );
+    }
     let pipedream = PipedreamClient::new(PipedreamConfig {
-        client_id: config.pipedream_client_id.to_string(),
-        client_secret: config.pipedream_client_secret.to_string(),
-        project_id: config.pipedream_project_id.to_string(),
+        client_id: pipedream_client_id.to_owned(),
+        client_secret: pipedream_client_secret.to_owned(),
+        project_id: pipedream_project_id.to_owned(),
         environment: config.pipedream_environment.clone(),
         api_url: config.pipedream_api_url.clone(),
         mcp_url: config.pipedream_mcp_url.clone(),
