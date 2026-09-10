@@ -32,12 +32,22 @@ describe('keepImportMetaDev', () => {
     ).toBe(false);
   });
 
-  it('refuses a local-backend origin on a non-development MODE', () => {
-    expect(() =>
+  it('allows same-origin proxy routing for a self-hosted production build', () => {
+    expect(
       keepImportMetaDev({
         command: 'build',
         mode: 'production',
         localBackendOrigin: 'same-origin',
+      })
+    ).toBe(false);
+  });
+
+  it('refuses a non same-origin override on a non-development MODE', () => {
+    expect(() =>
+      keepImportMetaDev({
+        command: 'build',
+        mode: 'production',
+        localBackendOrigin: 'https://preview.example.test',
       })
     ).toThrow(/MODE=production/);
   });

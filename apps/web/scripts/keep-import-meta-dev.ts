@@ -5,6 +5,9 @@
  * `MODE=development NODE_ENV=production vite build` would otherwise ship
  * DEV=false. Local-backend bundles (`just stack up`) already set
  * `VITE_LOCAL_BACKEND_ORIGIN`; hosted `just build-dev` / staging / prod do not.
+ * A production self-hosted bundle may still use the special `same-origin`
+ * value to select the public reverse proxy, but it must remain a production
+ * bundle (`DEV=false`).
  *
  * `vite serve` already has DEV=true, so this only applies to `build`.
  */
@@ -14,7 +17,8 @@ export function keepImportMetaDev(opts: {
   localBackendOrigin: string | undefined;
 }): boolean {
   const hasOrigin = Boolean(opts.localBackendOrigin);
-  if (hasOrigin && opts.mode !== 'development') {
+  const isSameOrigin = opts.localBackendOrigin === 'same-origin';
+  if (hasOrigin && opts.mode !== 'development' && !isSameOrigin) {
     throw new Error(
       `VITE_LOCAL_BACKEND_ORIGIN is set on MODE=${opts.mode}; refusing to keep import.meta.env.DEV`
     );

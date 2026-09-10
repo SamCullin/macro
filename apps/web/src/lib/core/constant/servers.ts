@@ -92,7 +92,7 @@ function proxyServers(): Servers | undefined {
   if (!proxyOrigin || !wsProxyOrigin) return undefined;
   return {
     'auth-service': `${proxyOrigin}/auth`,
-    'auth-logout': serverHostLocal['auth-logout'],
+    'auth-logout': `${proxyOrigin}/app/login`,
     'pdf-service': serverHostLocal['pdf-service'], // no local container
     'document-storage-service': `${proxyOrigin}/dss`,
     'websocket-service': `${wsProxyOrigin}/websocket`,
@@ -173,18 +173,26 @@ function selectSyncServiceHost():
       ws: `wss://${overrideHost}`,
     };
   }
+  const selectedLocalServers: string = import.meta.env.VITE_LOCAL_SERVERS;
+  if (
+    proxyOrigin &&
+    wsProxyOrigin &&
+    (import.meta.env.MODE !== 'development' ||
+      selectedLocalServers === 'ALL' ||
+      selectedLocalServers?.includes('sync-service'))
+  ) {
+    // Route sync through the single-origin proxy when it is in use. This is
+    // also required for self-hosted production bundles, where MODE is not
+    // development but the public reverse proxy still owns /sync.
+    return { worker: `${proxyOrigin}/sync`, ws: `${wsProxyOrigin}/sync` };
+  }
   if (import.meta.env.MODE !== 'development') {
     return syncServiceHostRemote;
   }
-  const selectedLocalServers: string = import.meta.env.VITE_LOCAL_SERVERS;
   if (
     selectedLocalServers === 'ALL' ||
     selectedLocalServers?.includes('sync-service')
   ) {
-    // Route sync through the single-origin proxy when it is in use.
-    if (proxyOrigin && wsProxyOrigin) {
-      return { worker: `${proxyOrigin}/sync`, ws: `${wsProxyOrigin}/sync` };
-    }
     return syncServiceHostLocal;
   }
   return syncServiceHostRemote;
