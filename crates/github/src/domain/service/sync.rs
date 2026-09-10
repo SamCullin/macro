@@ -1052,7 +1052,13 @@ impl<
             self.config.installation_state_secret.as_bytes(),
             chrono::Utc::now().timestamp(),
         )
-        .map_err(|_| GithubError::InvalidInstallationState)?;
+        .map_err(|error| {
+            // Keep the public error deliberately generic, but retain the
+            // non-sensitive validation reason for production diagnostics.
+            // Never log the signed state or the installation-state secret.
+            tracing::warn!(error = ?error, "invalid GitHub installation setup state");
+            GithubError::InvalidInstallationState
+        })?;
         let setup_action = GithubInstallationSetupAction::try_from(setup_action)?;
 
         let code = code.ok_or(GithubError::MissingInstallationSetupField("code"))?;
