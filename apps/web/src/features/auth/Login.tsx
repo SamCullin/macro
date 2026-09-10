@@ -54,6 +54,9 @@ import { OtpInput } from './OtpInput';
 import { Stage } from './Shared';
 import { useSsoLogin } from './useSsoLogin';
 
+const AUTHENTIK_SSO_ENABLED =
+  import.meta.env.VITE_AUTHENTIK_IDP_ENABLED === 'true';
+
 function PostLoginRedirect() {
   const navigate = useNavigate();
 
@@ -131,6 +134,17 @@ function LoginPicker(props: {
         <IconGoogle class="size-fit" />
         Continue with Google
       </Button>
+
+      <Show when={AUTHENTIK_SSO_ENABLED}>
+        <Button
+          variant="outline"
+          size="xl"
+          class="bg-surface"
+          onClick={() => startSsoLogin('authentik')}
+        >
+          Continue with Authentik
+        </Button>
+      </Show>
 
       <Show when={showApple}>
         <Button
