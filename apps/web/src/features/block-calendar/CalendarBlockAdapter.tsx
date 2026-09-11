@@ -1,14 +1,14 @@
 import { CalendarViewContextProvider } from '@app/features/calendar/components/CalendarViewContext';
 import { useCalendarUiFlag } from '@app/features/calendar/hooks/use-calendar-ui-flag';
 import { isCalendarRangeSupported } from '@app/features/calendar/utils/calendar-supported-range';
-import { analytics } from '@app/lib/analytics/analytics';
+import { useAnalytics } from '@app/lib/analytics/analytics-context';
 import { usePosthog } from '@app/lib/analytics/posthog';
 import { globalSplitManager } from '@app/signal/splitLayout';
 import { useSplitPanelOrThrow } from '@components/app/split-layout/layoutUtils';
 import { LoadingBlock } from '@core/component/LoadingBlock';
+import { useUserId } from '@core/context/user';
 import { createMethodRegistration } from '@core/orchestrator';
 import { blockHandleSignal } from '@core/signal/load';
-import { useUserInfoQuery } from '@queries/auth/user-info';
 import { useCalendarOccurrencesQuery } from '@queries/calendar/occurrences';
 import { useSearchParams } from '@solidjs/router';
 import { createMemo, onMount, Show } from 'solid-js';
@@ -38,11 +38,8 @@ function CalendarBlockDisabledFallback() {
 /** Bridges the singleton block lifecycle and navigation API to CalendarView. */
 function CalendarBlockAdapter(props: CalendarBlockProps) {
   const calendarUiEnabled = useCalendarUiFlag();
-  // This adapter is lazy-loaded as a separate block chunk. Read the shared
-  // query rather than the context hook so self-host builds do not create a
-  // second UserContext identity in that chunk.
-  const userInfoQuery = useUserInfoQuery();
-  const userId = createMemo(() => userInfoQuery.data?.id);
+  const userId = useUserId();
+  const analytics = useAnalytics();
   const blockHandle = blockHandleSignal.get;
   const [searchParams] = useSearchParams();
   const searchParam = (value: string | string[] | undefined) =>
