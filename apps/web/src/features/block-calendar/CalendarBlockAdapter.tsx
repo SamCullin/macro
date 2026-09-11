@@ -26,10 +26,18 @@ function CalendarBlockDisabledRedirect() {
   return null;
 }
 
+function CalendarBlockDisabledFallback() {
+  const posthog = usePosthog();
+  return (
+    <Show when={posthog.flagsLoaded()} fallback={<LoadingBlock />}>
+      <CalendarBlockDisabledRedirect />
+    </Show>
+  );
+}
+
 /** Bridges the singleton block lifecycle and navigation API to CalendarView. */
 function CalendarBlockAdapter(props: CalendarBlockProps) {
   const calendarUiEnabled = useCalendarUiFlag();
-  const posthog = usePosthog();
   const userId = useUserId();
   const analytics = useAnalytics();
   const blockHandle = blockHandleSignal.get;
@@ -106,11 +114,7 @@ function CalendarBlockAdapter(props: CalendarBlockProps) {
   return (
     <Show
       when={calendarUiEnabled()}
-      fallback={
-        <Show when={posthog.flagsLoaded()} fallback={<LoadingBlock />}>
-          <CalendarBlockDisabledRedirect />
-        </Show>
-      }
+      fallback={<CalendarBlockDisabledFallback />}
     >
       <CalendarFocusContextProvider target={focusTarget}>
         <CalendarViewContextProvider>

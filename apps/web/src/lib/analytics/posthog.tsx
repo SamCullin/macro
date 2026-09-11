@@ -60,19 +60,27 @@ function readFeatureFlag<T extends JsonType>(
   flagOrKey: RemoteFlag | string,
   opts?: FeatureFlagOpts<T>
 ): Accessor<FeatureFlagResult<T | undefined>> {
+  const fallbackPayload = opts?.fallbackPayload;
+  const remote = typeof flagOrKey === 'string' ? undefined : flagOrKey;
+  const key = typeof flagOrKey === 'string' ? flagOrKey : flagOrKey.key;
+  const override = remote?.override ?? opts?.enabledOverride;
+
+  // Self-hosted builds can intentionally run without PostHog. Resolve an
+  // explicit Vite override before reading the PostHog context so those builds
+  // do not require a provider that cannot exist when the module is split into
+  // a separately loaded block chunk.
+  if (override !== undefined) {
+    return () => ({
+      enabled: override,
+      payload: fallbackPayload,
+      loading: false,
+    });
+  }
+
   const posthog = usePosthog();
 
   return createMemo(
     () => {
-      const fallbackPayload = opts?.fallbackPayload;
-      const remote = typeof flagOrKey === 'string' ? undefined : flagOrKey;
-      const key = typeof flagOrKey === 'string' ? flagOrKey : flagOrKey.key;
-      const override = remote?.override ?? opts?.enabledOverride;
-
-      if (override !== undefined) {
-        return { enabled: override, payload: fallbackPayload, loading: false };
-      }
-
       if (!posthog.flagsLoaded()) {
         return { enabled: false, payload: fallbackPayload, loading: true };
       }
