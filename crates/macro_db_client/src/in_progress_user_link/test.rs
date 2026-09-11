@@ -62,9 +62,9 @@ async fn count_excludes_expired_links(pool: Pool<Postgres>) -> anyhow::Result<()
     let macro_user_id = macro_uuid::generate_uuid_v7();
     insert_macro_user(&pool, macro_user_id).await?;
 
-    // A link created just over 24 hours ago should no longer count toward the cap.
+    // A link created more than an hour ago should no longer count toward the cap.
     let expired_link_id = create_in_progress_user_link(&pool, &macro_user_id.to_string()).await?;
-    let stale_created_at = chrono::Utc::now().naive_utc() - chrono::Duration::hours(25);
+    let stale_created_at = chrono::Utc::now().naive_utc() - chrono::Duration::hours(2);
     sqlx::query!(
         r#"
             UPDATE in_progress_user_link
@@ -84,7 +84,7 @@ async fn count_excludes_expired_links(pool: Pool<Postgres>) -> anyhow::Result<()
         count_existing_in_progress_user_links_for_user(&pool, &macro_user_id.to_string()).await?;
     assert_eq!(
         count, 1,
-        "in-progress links older than 24 hours should not count toward the cap"
+        "in-progress links older than an hour should not count toward the cap"
     );
 
     Ok(())

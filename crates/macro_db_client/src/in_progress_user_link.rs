@@ -5,8 +5,11 @@ mod test;
 
 /// The age after which an in-progress user link is considered expired: it no longer counts
 /// toward a user's in-progress link cap, and is eligible for cleanup by
-/// [`delete_day_old_in_progress_user_links`].
-const IN_PROGRESS_USER_LINK_MAX_AGE: chrono::Duration = chrono::Duration::hours(24);
+/// [`delete_expired_in_progress_user_links`].
+///
+/// OAuth flows should complete within minutes. Keeping abandoned attempts for a full day lets
+/// repeated provider failures exhaust the five-link guard before the scheduled cleanup runs.
+const IN_PROGRESS_USER_LINK_MAX_AGE: chrono::Duration = chrono::Duration::hours(1);
 
 pub async fn count_existing_in_progress_user_links_for_user(
     db: &sqlx::Pool<sqlx::Postgres>,
@@ -102,8 +105,8 @@ where
     Ok(())
 }
 
-/// Deletes all in progress email links that are older than 24 hours
-pub async fn delete_day_old_in_progress_user_links(
+/// Deletes all in-progress user links that are older than the expiry window.
+pub async fn delete_expired_in_progress_user_links(
     db: &sqlx::Pool<sqlx::Postgres>,
 ) -> anyhow::Result<()> {
     let yesterday = (chrono::Utc::now() - IN_PROGRESS_USER_LINK_MAX_AGE).naive_utc();
